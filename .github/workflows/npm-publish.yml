@@ -1,143 +1,64 @@
-name: CI/CD Pipeline — Node.js to AWS EC2
+name: Deploy Node App to EC2
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: 20
 
 jobs:
-  # ─────────────────────────────────────────
-  # JOB 1: Test
-  # ─────────────────────────────────────────
-  test:
-    name: 🧪 Install & Test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run linter
-        run: npm run lint --if-present
-
-      - name: Run tests
-        run: npm test --if-present
-
-  # ─────────────────────────────────────────
-  # JOB 2: Build
-  # ─────────────────────────────────────────
-  build:
-    name: 🔨 Build
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --omit=dev
-
-      - name: Create deployment package
-        run: |
-          zip -r deploy.zip . \
-            --exclude "*.git*" \
-            --exclude "*.github*" \
-            --exclude "node_modules/.*" \
-            --exclude "test/*" \
-            --exclude "*.md"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: deploy-package
-          path: deploy.zip
-          retention-days: 1
-
-  # ─────────────────────────────────────────
-  # JOB 3: Deploy to EC2
-  # ─────────────────────────────────────────
   deploy:
-    name: 🚀 Deploy to AWS EC2
     runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    environment: production
 
     steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: deploy-package
+      - name: Checkout Source
+        uses: actions/checkout@v4
 
-      - name: Deploy to EC2 via SSH
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Project
+        run: npm run build --if-present
+
+      - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key: ${{ secrets.EC2_KEY }}
           port: 22
           script: |
-            # Create app directory if it doesn't exist
-            mkdir -p /home/${{ secrets.EC2_USER }}/app
 
-            # Move to app directory
-            cd /home/${{ secrets.EC2_USER }}/app
+            APP_DIR=/home/ubuntu/neo
 
-            # Stop existing PM2 process (ignore error if not running)
-            pm2 stop app || true
+            # Clone project first time
+            if [ ! -d "$APP_DIR" ]; then
+              git clone https://github.com/aamirkhan1600/neo.git $APP_DIR
+            fi
 
-      - name: Copy package to EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "deploy.zip"
-          target: "/home/${{ secrets.EC2_USER }}/app"
+            cd $APP_DIR
 
-      - name: Extract & restart app on EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          script: |
-            cd /home/${{ secrets.EC2_USER }}/app
+            # Pull latest code
+            git fetch --all
+            git reset --hard origin/main
 
-            # Extract new deployment
-            unzip -o deploy.zip
+            # Install dependencies
+            npm install
 
-            # Install production dependencies
-            npm ci --omit=dev
+            # Build project
+            npm run build --if-present
 
-            # Restart app with PM2
-            pm2 start ecosystem.config.js --env production || pm2 restart app
+            # Restart app
+            pm2 restart neo || pm2 start npm --name neo -- start
 
-            # Save PM2 process list
+            # Save PM2
             pm2 save
 
-            echo "✅ Deployment successful!"
+            echo "Deployment Successful"
