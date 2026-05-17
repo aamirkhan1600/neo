@@ -4,7 +4,7 @@ Production-grade auto-trading SaaS platform built on **Node.js + Express + EJS +
 
 ## Highlights   
 
-| Module | What it does | 
+| Module | What it does |   
 | --- | --- |  
 | `src/app.js` | Express HTTP + EJS server. Serves UI + REST API. PM2 cluster-ready. |
 | `src/worker.js` | Standalone work  er process. Polls `job_queue` and dispatches handlers. |
