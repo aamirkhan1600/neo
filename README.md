@@ -2,7 +2,7 @@
 
 Production-grade auto-trading SaaS platform built on **Node.js + Express + EJS + MySQL** — integrated with the **Kotak Neo** broker APIs. Designed to handle ~5000 concurrent users **without Redis or BullMQ**: the job queue lives in MySQL.
 
-## Highlights   
+## Highlights         
 
 | Module | What it does |   
 | --- | --- |  
