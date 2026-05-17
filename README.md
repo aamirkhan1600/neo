@@ -8,7 +8,7 @@ Production-grade auto-trading SaaS platform built on **Node.js + Express + EJS +
 | --- | --- |  
 | `src/app.js` | Express HTTP + EJS server. Serves UI + REST API. PM2 cluster-ready. |
 | `src/worker.js` | Standalone work  er process. Polls `job_queue` and dispatches handlers. |
-| `src/services/jobQueue.js` | MySQL/MariaDB-backed queue. Atomic claim via `UPDATE ... ORDER BY ... LIMIT` with a per-call token (works on MariaDB < 10.6, no `SKIP LOCKED` needed). Stale-lock reaper  , exponential backoff (`5s × retry_count`), DEAD letter status, manual retry. |
+| `src/services/jobQue ue.js` | MySQL/MariaDB-backed queue. Atomic claim via `UPDATE ... ORDER BY ... LIMIT` with a per-call token (works on MariaDB < 10.6, no `SKIP LOCKED` needed). Stale-lock reaper  , exponential backoff (`5s × retry_count`), DEAD letter status, manual retry. |
 | `src/services/tokenBucket.js` | Per-user 10 rps token bucket for the Kotak rate limit. |
 | `src/services/brokerClient.js` | Raw Kotak Neo HTTP client — view-token → TOTP login → MPIN/OTP validate → trade APIs. |
 | `src/services/brokerService.js` | Adds rate-limiting, transparent re-login on 401, decryption of session tokens. |
