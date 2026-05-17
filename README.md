@@ -5,7 +5,7 @@ Production-grade auto-trading SaaS platform built on **Node.js + Express + EJS +
 ## Highlights   
 
 | Module | What it does | 
-| --- | --- |
+| --- | --- |  
 | `src/app.js` | Express HTTP + EJS server. Serves UI + REST API. PM2 cluster-ready. |
 | `src/worker.js` | Standalone work  er process. Polls `job_queue` and dispatches handlers. |
 | `src/services/jobQueue.js` | MySQL/MariaDB-backed queue. Atomic claim via `UPDATE ... ORDER BY ... LIMIT` with a per-call token (works on MariaDB < 10.6, no `SKIP LOCKED` needed). Stale-lock reaper, exponential backoff (`5s × retry_count`), DEAD letter status, manual retry. |
