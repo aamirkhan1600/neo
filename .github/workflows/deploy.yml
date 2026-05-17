@@ -21,7 +21,6 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
-
             APP_DIR=/home/ubuntu/neo
 
             if [ ! -d "$APP_DIR" ]; then
@@ -35,10 +34,6 @@ jobs:
 
             npm install
 
-            npm run build --if-present
-
             pm2 restart neo || pm2 start npm --name neo -- start
 
             pm2 save
-
-            echo "Deployment Successful"
