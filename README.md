@@ -1,4 +1,4 @@
-# Kotak Neo Trading SaaS
+# Kotak Neo Trading SaaS   
 
 Production-grade auto-trading SaaS platform built on **Node.js + Express + EJS + MySQL** — integrated with the **Kotak Neo** broker APIs. Designed to handle ~5000 concurrent users **without Redis or BullMQ**: the job queue lives in MySQL.
 
@@ -185,5 +185,6 @@ marketData WS  ──tick──►  strategyRunner ──►  strategyEngine.eva
 ## Future Work
 
 Multi-broker (Zerodha, mstock, Fyers); backtesting engine; RSI/MACD indicators; mobile app via the same REST API.
-#   n e o  
+#   n e o 
+ 
  
