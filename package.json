@@ -1,0 +1,41 @@
+{
+  "name": "kotak-neo-saas",
+  "version": "1.0.0",
+  "description": "Production-grade trading SaaS platform on Node.js + EJS + MySQL with Kotak Neo integration. No Redis, no BullMQ. MySQL-backed job queue.",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "worker": "node src/worker.js",
+    "dev": "nodemon src/app.js",
+    "dev:worker": "nodemon src/worker.js",
+    "migrate": "node src/db/migrate.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "test": "node --test 'test/**/*.test.js'"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "bcrypt": "^5.1.1",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "express-session": "^1.18.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.0",
+    "socket.io": "^4.7.5",
+    "uuid": "^10.0.0",
+    "winston": "^3.13.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

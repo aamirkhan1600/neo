@@ -1,0 +1,560 @@
+<%- include('partials/header') %>
+<style>
+  /* LTP price flash — green when ticking up, red when ticking down. */
+  @keyframes ltp-up-flash   { 0% { background-color: rgba(16,185,129,.35);} 100% { background-color: transparent;} }
+  @keyframes ltp-down-flash { 0% { background-color: rgba(244,63,94,.35); } 100% { background-color: transparent;} }
+  .ltp-up   { animation: ltp-up-flash   .6s ease-out; color: #047857; }
+  .ltp-down { animation: ltp-down-flash .6s ease-out; color: #be123c; }
+  .how-it-works > summary::-webkit-details-marker { display: none; }
+  .how-it-works > summary { list-style: none; }
+  .how-it-works > summary::before { content: '▸ '; color: #6b7280; }
+  .how-it-works[open] > summary::before { content: '▾ '; }
+  .how-it-works[open] > summary .text-xs { display: none; }
+  .how-it-works h3 { margin: 0; }
+</style>
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="mb-0">Premium Trigger</h1>
+  <div class="flex gap-2">
+    <a href="/premium-trigger/settings" class="btn">Settings</a>
+    <a href="/premium-trigger/backtest" class="btn">Backtest</a>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="flex flex-wrap items-center gap-3">
+    <span id="modeBadge" class="mode-badge mode-paper">PAPER</span>
+    <button id="toggleBtn" class="btn-primary">…</button>
+    <button id="exitBtn" class="btn-warn">Square off all</button>
+    <button id="restrikeCe" class="btn-secondary">Restrike CE</button>
+    <button id="restrikePe" class="btn-secondary">Restrike PE</button>
+    <label class="flex items-center gap-2 text-sm cursor-pointer select-none ml-2 px-2 py-1 rounded border border-line">
+      <input type="checkbox" id="autoRestrikeToggle" /> Auto-restrike on drift
+    </label>
+    <span id="status" class="muted text-sm ml-auto"></span>
+  </div>
+  <div id="meta" class="muted text-sm mt-3 flex flex-wrap gap-x-4 gap-y-1"></div>
+  <div id="wsDiag" class="text-xs mt-2 px-3 py-2 rounded border border-line bg-surface-muted hidden"></div>
+  <p class="error mt-2" id="err"></p>
+</div>
+
+<details class="card mb-4 how-it-works">
+  <summary class="cursor-pointer select-none flex items-center justify-between gap-3">
+    <span class="font-semibold text-ink-900">How it works</span>
+    <span class="text-xs muted">Click to expand</span>
+  </summary>
+  <div class="mt-4 grid gap-4 lg:grid-cols-2 text-sm leading-relaxed">
+    <div>
+      <h3>What this strategy does</h3>
+      <p class="mt-2 text-ink-700">
+        <strong>Sells</strong> (shorts) the CE and PE legs when their
+        premium <strong>rises through your trigger</strong>, then
+        <strong>buys back</strong> when premium falls to <span class="pnl-pos">target</span>
+        (profit) or rises to <span class="pnl-neg">stoploss</span>
+        (loss). Each leg runs independently.
+      </p>
+    </div>
+
+    <div>
+      <h3>Tick state machine</h3>
+      <ol class="mt-2 space-y-1 text-ink-700 list-decimal list-inside">
+        <li><strong>Re-arm</strong> — LTP back inside rearm window → <span class="pill pill-mute">armed</span></li>
+        <li><strong>Drift watch</strong> — LTP outside window starts auto-restrike timer</li>
+        <li><strong>Day-loss check</strong> — block new entries if cap hit</li>
+        <li><strong>Capture &amp; confirm</strong> — two ticks: snap trigger, then confirm</li>
+        <li><strong>Exit</strong> — buy back on target or stoploss</li>
+      </ol>
+    </div>
+
+    <div>
+      <h3>Entry sequence</h3>
+      <ol class="mt-2 space-y-1 text-ink-700 list-decimal list-inside">
+        <li>Premium enters the rearm window around <em>entryTrigger</em> → leg <strong>arms</strong>.</li>
+        <li>Next qualifying tick is <strong>captured</strong> as the trigger price.</li>
+        <li>Following tick at <em>triggerPrice + reentryOffset</em> <strong>confirms</strong> → place <strong>SELL MKT</strong> (MIS).</li>
+        <li>If LTP fades by <em>captureFadeThreshold</em> while waiting, the trigger is dropped.</li>
+      </ol>
+    </div>
+
+    <div>
+      <h3>Target &amp; Stoploss</h3>
+      <p class="mt-2 text-ink-700">
+        Computed from the actual fill price, per‑leg, in rupees:
+      </p>
+      <ul class="mt-1 text-ink-700 space-y-0.5">
+        <li><span class="pnl-pos">Target price</span> = entryPrice − target (first entry uses <em>target</em>, re-entries use <em>reentryTarget</em>)</li>
+        <li><span class="pnl-neg">SL price</span> = entryPrice + stoploss</li>
+        <li>Whichever is hit first → <strong>BUY MKT</strong> to close. Net P&amp;L = points × qty × lotSize − charges.</li>
+      </ul>
+      <p class="mt-2 muted text-xs">
+        Worked example: trigger 250, target 5, SL 10 — SELL fills at 253, target at 248, SL at 263.
+      </p>
+    </div>
+
+    <div>
+      <h3>Auto-restrike on drift</h3>
+      <p class="mt-2 text-ink-700">
+        If a leg sits outside its rearm window for <em>restrikeDwellSec</em>
+        (and <em>restrikeCooldownSec</em> has passed since the last
+        rotation), the engine re-scans the chain and rotates to a new
+        OTM strike whose premium is back in‑window. Never rotates while
+        a leg is SHORT. After 3 cycles where no in-window strike exists
+        (chain decayed), entry can fire on the available premium
+        (<em>loosened mode</em>).
+      </p>
+    </div>
+
+    <div>
+      <h3>Manual controls</h3>
+      <ul class="mt-2 text-ink-700 space-y-0.5">
+        <li><strong>Start / Stop</strong> — toggles the engine. Stop does not square off.</li>
+        <li><strong>Square off all</strong> — BUY MKT close on every open leg.</li>
+        <li><strong>Restrike CE / PE</strong> — force-close (if SHORT) and rotate to a fresh OTM strike. Operator override; ignores dwell &amp; cooldown.</li>
+        <li><strong>Auto-restrike on drift</strong> — enables the watcher above.</li>
+      </ul>
+    </div>
+
+    <div>
+      <h3>EOD &amp; safety</h3>
+      <ul class="mt-2 text-ink-700 space-y-0.5">
+        <li><strong>EOD auto-exit</strong> at <em>eodAutoExit</em> (default 15:20 IST) — squares off + stops.</li>
+        <li><strong>Daily loss cap</strong> (<em>maxDailyLoss</em>) — once realised loss ≤ −cap, no new entries on either leg until the config is re-saved.</li>
+        <li><strong>SL lock</strong> — a leg that hit SL won't re-enter the same session.</li>
+      </ul>
+    </div>
+
+    <div>
+      <h3>Paper vs Live</h3>
+      <p class="mt-2 text-ink-700">
+        Paper mode uses the same tick stream and quote endpoints; only
+        order placement is simulated (orders get a <code>PAPER-…</code> ID
+        and never reach the broker). Live mode places <code>MIS / MKT</code>
+        orders via Kotak Neo. The mode badge at the top reflects which
+        you're running.
+      </p>
+    </div>
+
+    <div class="lg:col-span-2 border-t border-line pt-4">
+      <h3>Broker bracket exits (opt-in)</h3>
+      <p class="mt-2 text-ink-700">
+        When <em>Use broker bracket exits</em> is enabled in settings,
+        the engine switches to the standard option-selling pattern:
+      </p>
+      <ol class="mt-2 space-y-1 text-ink-700 list-decimal list-inside">
+        <li>SELL entry fills (MIS · MKT) — same as today.</li>
+        <li>Place <strong>SL-M BUY</strong> at <em>entry + stoploss</em> as the trigger.</li>
+        <li>Place <strong>LIMIT BUY</strong> at <em>entry − target</em>.</li>
+        <li>Status is polled every <em>bracketStatusPollMs</em>. When one fills, the other is cancelled (OCO).</li>
+        <li>Restrike, manual exit, and EOD all <strong>cancel both children first</strong> before flattening with MKT.</li>
+      </ol>
+      <p class="mt-2 text-ink-700">
+        A tick-based <strong>safety hammer</strong> stays armed: if LTP
+        overshoots SL by <em>bracketSafetyOvershoot</em> and the broker
+        hasn't reported a fill within <em>bracketSafetyTimeoutMs</em>, the
+        engine cancels both children and flattens with MKT. Paper mode
+        simulates the brackets so paper P&amp;L matches live behavior.
+      </p>
+    </div>
+  </div>
+</details>
+
+<section class="grid-cards mb-4" id="legCards">
+  <div class="card leg-card" id="legCe">
+    <h2 class="ce-head mb-3">CALL (CE)</h2>
+    <table class="kv">
+      <tr><th>Symbol</th><td class="v sym">—</td></tr>
+      <tr><th>Strike</th><td class="v strike">—</td></tr>
+      <tr><th>Position</th><td class="v pos">—</td></tr>
+      <tr><th>LTP</th><td class="v"><span class="ltp">—</span> <span class="ltpAge text-[11px] text-ink-500"></span></td></tr>
+      <tr><th>Entry</th><td class="v entry">—</td></tr>
+      <tr><th>Target</th><td class="v target">—</td></tr>
+      <tr><th>Stoploss</th><td class="v sl">—</td></tr>
+      <tr><th>Unrealized</th><td class="v unreal">—</td></tr>
+      <tr><th>Realized</th><td class="v real">—</td></tr>
+      <tr><th>Won / Lost</th><td class="v wl">—</td></tr>
+      <tr><th>Restrikes</th><td class="v restrikes">—</td></tr>
+      <tr><th>Drift</th><td class="v drift">—</td></tr>
+      <tr><th>Armed</th><td class="v armed">—</td></tr>
+      <tr class="brk-row hidden"><th>Bracket</th><td class="v brkStatus">—</td></tr>
+      <tr class="brk-row hidden"><th>SL Order</th><td class="v brkSl text-xs font-mono">—</td></tr>
+      <tr class="brk-row hidden"><th>Target Order</th><td class="v brkTgt text-xs font-mono">—</td></tr>
+      <tr><th>Status</th><td class="v decision">—</td></tr>
+    </table>
+  </div>
+  <div class="card leg-card" id="legPe">
+    <h2 class="pe-head mb-3">PUT (PE)</h2>
+    <table class="kv">
+      <tr><th>Symbol</th><td class="v sym">—</td></tr>
+      <tr><th>Strike</th><td class="v strike">—</td></tr>
+      <tr><th>Position</th><td class="v pos">—</td></tr>
+      <tr><th>LTP</th><td class="v"><span class="ltp">—</span> <span class="ltpAge text-[11px] text-ink-500"></span></td></tr>
+      <tr><th>Entry</th><td class="v entry">—</td></tr>
+      <tr><th>Target</th><td class="v target">—</td></tr>
+      <tr><th>Stoploss</th><td class="v sl">—</td></tr>
+      <tr><th>Unrealized</th><td class="v unreal">—</td></tr>
+      <tr><th>Realized</th><td class="v real">—</td></tr>
+      <tr><th>Won / Lost</th><td class="v wl">—</td></tr>
+      <tr><th>Restrikes</th><td class="v restrikes">—</td></tr>
+      <tr><th>Drift</th><td class="v drift">—</td></tr>
+      <tr><th>Armed</th><td class="v armed">—</td></tr>
+      <tr class="brk-row hidden"><th>Bracket</th><td class="v brkStatus">—</td></tr>
+      <tr class="brk-row hidden"><th>SL Order</th><td class="v brkSl text-xs font-mono">—</td></tr>
+      <tr class="brk-row hidden"><th>Target Order</th><td class="v brkTgt text-xs font-mono">—</td></tr>
+      <tr><th>Status</th><td class="v decision">—</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="card mb-4">
+  <h2 class="mb-3">Totals</h2>
+  <div class="grid gap-3 tabular-nums" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))" id="totals">
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Realized</div><strong id="tRealized" class="text-base">—</strong></div>
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Unrealized</div><strong id="tUnreal" class="text-base">—</strong></div>
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Drawdown</div><strong id="tDD" class="text-base">—</strong></div>
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Trades</div><strong id="tTrades" class="text-base">—</strong></div>
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Won / Lost</div><strong id="tWL" class="text-base">—</strong></div>
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Accuracy</div><strong id="tAcc" class="text-base">—</strong></div>
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Profit factor</div><strong id="tPF" class="text-base">—</strong></div>
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Charges</div><strong id="tCharges" class="text-base">—</strong></div>
+    <div class="bg-surface-muted border border-line rounded-md p-3"><div class="text-[11px] uppercase tracking-wider text-ink-500">Restrikes</div><strong id="tRestrikes" class="text-base">—</strong></div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="flex items-center justify-between mb-3">
+    <h2>Recent signals</h2>
+    <a href="/api/premium-trigger/signals.csv" class="btn !text-xs !px-2.5 !py-1">Download CSV</a>
+  </div>
+  <div class="overflow-auto -mx-2">
+    <table class="signals">
+      <thead><tr><th>Time</th><th>Mode</th><th>Side</th><th>Action</th><th>Reason</th><th class="text-right">Price</th><th class="text-right">Qty</th><th>Symbol</th><th>Status</th></tr></thead>
+      <tbody id="signals"><tr><td colspan="9" class="muted center py-6">No signals yet.</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const $err = document.getElementById('err');
+  const $status = document.getElementById('status');
+  const $meta = document.getElementById('meta');
+  const $toggle = document.getElementById('toggleBtn');
+  const $exit = document.getElementById('exitBtn');
+  const $rce = document.getElementById('restrikeCe');
+  const $rpe = document.getElementById('restrikePe');
+
+  const fmtMoney = (v) => v == null ? '—' : (v >= 0 ? '₹' : '-₹') + Math.abs(v).toFixed(2);
+  const fmtPts = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2);
+  const fmtPct = (v) => v == null ? '—' : v.toFixed(1) + '%';
+  const lastLtp = { ce: null, pe: null };
+  const legTokens = { ce: null, pe: null };
+  // Snapshot of last /status response per leg — let the live tick
+  // listener recompute Unrealized P&L on each tick instead of waiting
+  // for the next /status poll. Without this, in-trade Unrealized lags
+  // up to 500ms behind LTP and can briefly flash ₹0.00 right after an
+  // entry fires (when entryPrice and ltp briefly equal each other).
+  const legSnap = { ce: null, pe: null };
+
+  // Live LTP via socket.io — every tick the server's marketData client
+  // emits is forwarded to this user's room. We update the LTP cell as
+  // ticks arrive (instant) instead of waiting for the /status poll, and
+  // also recompute the Unrealized P&L cell so it tracks the live price.
+  // reconnection: true ensures the socket rebuilds the cookie-auth handshake
+  // after a token refresh, so live ticks resume without a page reload.
+  const socket = window.io ? io({ withCredentials: true, reconnection: true, reconnectionDelay: 1000 }) : null;
+  if (socket) {
+    socket.on('connect_error', (err) => {
+      // 401 from the socket auth means the access_token expired between
+      // poll attempts. Hit /refresh and reconnect once.
+      if (String(err && err.message).toLowerCase().includes('unauthorized')) {
+        fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+          .then((r) => { if (r.ok) socket.connect(); });
+      }
+    });
+    socket.on('tick', (t) => {
+      if (!t || t.ltp == null) return;
+      const tok = String(t.symbol);
+      const side = tok === legTokens.ce ? 'ce' : tok === legTokens.pe ? 'pe' : null;
+      if (!side) return;
+      const ltp = Number(t.ltp);
+      setLtpCell(side, ltp);
+      const snap = legSnap[side];
+      if (snap && snap.position === 'SHORT' && snap.entryPrice != null && snap.qty) {
+        const card = document.getElementById(side === 'ce' ? 'legCe' : 'legPe');
+        const unrealEl = card && card.querySelector('.unreal');
+        if (unrealEl) unrealEl.textContent = fmtMoney((snap.entryPrice - ltp) * snap.qty);
+      }
+    });
+  }
+
+  // Apply a price update to one leg's LTP cell — used by both the
+  // periodic /status pull (sets state-derived LTP) and the live socket.io
+  // 'tick' stream (instant LTP updates between polls).
+  const lastLtpChangeAt = { ce: null, pe: null };
+  function setLtpCell(side, ltp) {
+    if (ltp == null || !Number.isFinite(ltp)) return;
+    const card = document.getElementById(side === 'ce' ? 'legCe' : 'legPe');
+    const ltpEl = card && card.querySelector('.ltp');
+    if (!ltpEl) return;
+    const prev = lastLtp[side];
+    ltpEl.textContent = ltp.toFixed(2);
+    if (prev != null && ltp !== prev) {
+      ltpEl.classList.remove('ltp-up', 'ltp-down');
+      void ltpEl.offsetWidth;
+      ltpEl.classList.add(ltp > prev ? 'ltp-up' : 'ltp-down');
+      lastLtpChangeAt[side] = Date.now();
+    } else if (prev == null) {
+      lastLtpChangeAt[side] = Date.now();
+    }
+    lastLtp[side] = ltp;
+  }
+  // Refresh the "Xs ago" age annotation every second so a sticky LTP is
+  // visibly stale even when no new ticks arrive.
+  setInterval(() => {
+    for (const side of ['ce', 'pe']) {
+      const card = document.getElementById(side === 'ce' ? 'legCe' : 'legPe');
+      const ageEl = card && card.querySelector('.ltpAge');
+      if (!ageEl) continue;
+      const at = lastLtpChangeAt[side];
+      if (at == null) { ageEl.textContent = ''; continue; }
+      const sec = Math.floor((Date.now() - at) / 1000);
+      ageEl.textContent = sec === 0 ? '· just now'
+                       : sec < 60 ? `· ${sec}s ago`
+                       : `· ${Math.floor(sec / 60)}m ${sec % 60}s ago`;
+      ageEl.style.color = sec > 10 ? '#dc2626' : ''; // red after 10s sticky
+    }
+  }, 1000);
+
+  function setLeg(side, st) {
+    const card = document.getElementById(side === 'ce' ? 'legCe' : 'legPe');
+    const set = (cls, val) => { const el = card.querySelector('.' + cls); if (el) el.textContent = val; };
+    set('sym', st.symbol || '—');
+    set('strike', st.strike != null ? st.strike : '—');
+    const pos = card.querySelector('.pos');
+    pos.textContent = st.position || 'NONE';
+    pos.classList.remove('SHORT', 'NONE');
+    pos.classList.add(st.position || 'NONE');
+    // LTP cell — flash green/red on tick changes so the operator can see
+    // the price is live and which way it moved.
+    if (st.token != null) legTokens[side] = String(st.token);
+    legSnap[side] = {
+      position: st.position,
+      entryPrice: st.entryPrice != null ? Number(st.entryPrice) : null,
+      qty: st.qty != null ? Number(st.qty) : null,
+    };
+    setLtpCell(side, st.ltp != null ? Number(st.ltp) : null);
+    set('entry', st.entryPrice != null ? Number(st.entryPrice).toFixed(2) : '—');
+    set('target', st.targetPrice != null ? Number(st.targetPrice).toFixed(2) : '—');
+    set('sl', st.slPrice != null ? Number(st.slPrice).toFixed(2) : '—');
+    set('unreal', fmtMoney(st.unrealized));
+    set('real', fmtMoney(st.realizedPnl));
+    set('wl', `${st.tradesWon || 0} / ${st.tradesLost || 0}`);
+    const lastR = st.lastRestrikeAt ? new Date(st.lastRestrikeAt).toLocaleTimeString() : '—';
+    set('restrikes', `${st.restrikeCount || 0} (last ${lastR})`);
+    if (st.outsideWindowSince) {
+      const sec = Math.floor((Date.now() - st.outsideWindowSince) / 1000);
+      set('drift', `outside window ${sec}s` + (st.restrikeInProgress ? ' (restriking…)' : ''));
+    } else {
+      set('drift', st.restrikeInProgress ? 'restriking…' : 'in window');
+    }
+    set('armed', st.armed ? 'YES' : 'no');
+    set('decision', st.lastDecision || '—');
+    const brkRows = card.querySelectorAll('.brk-row');
+    if (st.bracket) {
+      brkRows.forEach(r => r.classList.remove('hidden'));
+      const tgt = st.bracket.targetPrice != null ? Number(st.bracket.targetPrice).toFixed(2) : '—';
+      const sl  = st.bracket.slTriggerPrice != null ? Number(st.bracket.slTriggerPrice).toFixed(2) : '—';
+      set('brkStatus', `${st.bracket.status} · TGT ${tgt} / SL ${sl}`);
+      set('brkSl',  st.bracket.slOrderId  || '—');
+      set('brkTgt', st.bracket.targetOrderId || '—');
+    } else {
+      brkRows.forEach(r => r.classList.add('hidden'));
+    }
+  }
+
+  // Wrapper: any /api fetch that 401s gets a token-refresh attempt and a
+  // single retry. The access_token cookie has a 15-min TTL — without
+  // this, a 15-min-old tab silently drops to "status fetch failed: 401"
+  // and the LTPs / decision fields stop updating until a hard reload.
+  let _refreshing = null;
+  async function fetchWithRefresh(url, init) {
+    init = init || {};
+    init.credentials = init.credentials || 'include';
+    let r = await fetch(url, init);
+    if (r.status !== 401) return r;
+    // Coalesce parallel refresh attempts into one network call.
+    if (!_refreshing) {
+      _refreshing = fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+        .finally(() => { setTimeout(() => { _refreshing = null; }, 0); });
+    }
+    const refresh = await _refreshing;
+    if (!refresh.ok) return r; // refresh itself failed — caller sees the 401
+    return fetch(url, init);
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetchWithRefresh('/api/premium-trigger/status');
+      if (!r.ok) {
+        $err.textContent = r.status === 401
+          ? 'session expired — log in again at /auth/login'
+          : 'status fetch failed: ' + r.status;
+        return;
+      }
+      const s = await r.json();
+      $err.textContent = s.lastError || '';
+      $toggle.textContent = s.running ? 'Stop' : 'Start';
+      $toggle.dataset.on = s.running ? '1' : '0';
+      $status.textContent = s.running ? 'RUNNING' : (s.enabled ? 'ENABLED (idle)' : 'DISABLED');
+      $status.className = 'text-sm font-medium ml-auto ' + (s.running ? 'ok' : (s.enabled ? 'text-amber-600' : 'muted'));
+      const $mb = document.getElementById('modeBadge');
+      const isLive = s.cfg.mode === 'live';
+      $mb.textContent = isLive ? 'LIVE' : 'PAPER';
+      $mb.className = 'mode-badge ' + (isLive ? 'mode-live' : 'mode-paper');
+      $mb.title = isLive ? 'LIVE — real orders are sent to Kotak Neo' : 'PAPER — fills are simulated locally; no broker call';
+      // Reflect server's autoRestrikeOnDrift on the toggle. The checkbox
+      // is only meaningful in OTM strike mode — disable it otherwise so
+      // the operator knows it has no effect on ATM/fixed configs.
+      const isOtm = s.cfg.strikeMode === 'otm';
+      $autoRestrike.disabled = !isOtm;
+      $autoRestrike.parentElement.title = isOtm
+        ? 'When ON, a leg whose LTP drifts outside its rearm window for `restrikeDwellSec` seconds rotates to the closest OTM strike. Set in /premium-trigger/settings.'
+        : 'Auto-restrike only applies in OTM strike mode (currently ' + (s.cfg.strikeMode || '?') + ')';
+      $autoRestrike.parentElement.style.opacity = isOtm ? '' : '0.5';
+      // Skip syncing while a manual click is mid-flight (checkbox is
+      // already showing the operator's intent).
+      if (document.activeElement !== $autoRestrike) {
+        $autoRestrike.checked = !!s.cfg.autoRestrikeOnDrift;
+      }
+      $meta.innerHTML = [
+        `Underlying <strong class="text-ink-900">${s.cfg.underlyingName}</strong>`,
+        `Expiry <strong class="text-ink-900">${s.cfg.expiry || 'auto'}</strong>`,
+        `Strike mode <strong class="text-ink-900">${s.cfg.strikeMode}</strong>`,
+        `Spot <strong class="text-ink-900">${s.spot != null ? Number(s.spot).toFixed(2) : '—'}</strong>`,
+        `Last tick <strong class="text-ink-900">${s.lastTickAt ? new Date(s.lastTickAt).toLocaleTimeString() : '—'}</strong>`,
+        s.dayLossLocked ? '<span class="bad font-semibold">DAY-LOSS LOCKED</span>' : '',
+      ].filter(Boolean).map(x => `<span>${x}</span>`).join('');
+      setLeg('ce', s.state.ce);
+      setLeg('pe', s.state.pe);
+      const $ws = document.getElementById('wsDiag');
+      if (s.ws) {
+        const ageFrame = s.ws.lastFrameAt ? Math.floor((Date.now() - s.ws.lastFrameAt) / 1000) + 's ago' : 'never';
+        const ageTick  = s.ws.lastTickAt  ? Math.floor((Date.now() - s.ws.lastTickAt)  / 1000) + 's ago' : 'never';
+        const agePoll  = s.ws.pollLastOk  ? Math.floor((Date.now() - s.ws.pollLastOk)  / 1000) + 's ago' : 'never';
+        const isOpen   = s.ws.readyStateLabel === 'OPEN';
+        const dataFlowing = s.ws.ticksEmitted > 0 || s.ws.pollLastOk;
+        const tone     = dataFlowing ? 'text-emerald-700'
+                       : isOpen ? 'text-amber-700' : 'text-rose-700';
+        let warn = '';
+        if (!dataFlowing) {
+          if (!isOpen) warn = ' — WS not connected, restart strategy or re-login to broker';
+          else if (s.ws.subsCount === 0) warn = ' — no subscriptions registered';
+          else if (s.ws.pollErrors > 0) warn = ` — REST poll erroring: ${s.ws.pollLastError || 'unknown'}`;
+          else if (s.ws.framesReceived === 0 && !s.ws.pollActive) warn = ' — gateway silent and REST poll disabled (set MARKET_DATA_POLL_MS=1000)';
+          else if (s.ws.framesReceived === 0) warn = ' — WS gateway silent, waiting on REST poll…';
+        }
+        const pollBit = s.ws.pollActive
+          ? `poll ${s.ws.pollCount}/${s.ws.pollErrors}err (last ok ${agePoll})`
+          : 'poll off';
+        $ws.classList.remove('hidden');
+        $ws.className = 'text-xs mt-2 px-3 py-2 rounded border border-line bg-surface-muted ' + tone;
+        $ws.textContent = `WS ${s.ws.readyStateLabel} · subs ${s.ws.subsCount} · frames ${s.ws.framesReceived} (last ${ageFrame}) · ticks ${s.ws.ticksEmitted} (last ${ageTick}) · ${pollBit}${warn}`;
+      } else {
+        $ws.classList.add('hidden');
+      }
+      document.getElementById('tRealized').textContent = fmtMoney(s.totalRealized);
+      document.getElementById('tUnreal').textContent = fmtMoney(s.totalUnrealized);
+      document.getElementById('tDD').textContent = fmtMoney(s.currentDrawdown) + ' / max ' + fmtMoney(s.maxDrawdown);
+      document.getElementById('tTrades').textContent = s.totalTrades || 0;
+      document.getElementById('tWL').textContent = `${s.totalWon || 0} / ${s.totalLost || 0}`;
+      document.getElementById('tAcc').textContent = fmtPct(s.accuracy);
+      document.getElementById('tPF').textContent = s.profitFactor == null ? '—'
+        : (s.profitFactor === Infinity ? '∞' : Number(s.profitFactor).toFixed(2));
+      document.getElementById('tCharges').textContent = fmtMoney(s.totalCharges);
+      document.getElementById('tRestrikes').textContent = s.restrikeCount || 0;
+
+      const sigs = s.signals || [];
+      const tb = document.getElementById('signals');
+      if (!sigs.length) {
+        tb.innerHTML = '<tr><td colspan="9" class="muted center py-6">No signals yet.</td></tr>';
+      } else {
+        tb.innerHTML = sigs.map(sig => {
+          const mode = (sig.mode || 'live').toUpperCase();
+          const okStatus = sig.status === 'placed' || sig.status === 'paper-filled';
+          const sideCls = String(sig.side).toLowerCase() === 'ce' ? 'ce-head' : 'pe-head';
+          return `
+          <tr>
+            <td class="text-xs text-ink-500 whitespace-nowrap">${new Date(sig.at).toLocaleTimeString()}</td>
+            <td><span class="mode-pill mode-${(sig.mode || 'live')}">${mode}</span></td>
+            <td class="${sideCls} font-semibold uppercase">${sig.side}</td>
+            <td>${sig.action}</td>
+            <td>${sig.reason}</td>
+            <td class="text-right tabular-nums">${Number(sig.price).toFixed(2)}</td>
+            <td class="text-right tabular-nums">${sig.qty}</td>
+            <td class="font-mono text-xs">${sig.symbol}</td>
+            <td class="${okStatus ? 'ok' : sig.status === 'rejected' ? 'bad' : ''}">${sig.status}${sig.rejectReason ? ' — ' + sig.rejectReason : ''}</td>
+          </tr>`;
+        }).join('');
+      }
+    } catch (err) { $err.textContent = err.message; }
+  }
+
+  $toggle.addEventListener('click', async () => {
+    const on = $toggle.dataset.on !== '1';
+    const r = await fetchWithRefresh('/api/premium-trigger/toggle', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', body: JSON.stringify({ on }),
+    });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); $err.textContent = j.message || j.error || 'toggle failed'; }
+    refresh();
+  });
+
+  $exit.addEventListener('click', async () => {
+    if (!confirm('Square off ALL open premium-trigger positions?')) return;
+    await fetchWithRefresh('/api/premium-trigger/exit-all', { method: 'POST' });
+    refresh();
+  });
+
+  $rce.addEventListener('click', async () => {
+    const r = await fetchWithRefresh('/api/premium-trigger/restrike?side=ce', { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) $err.textContent = j.message || j.error || 'restrike CE failed';
+    refresh();
+  });
+  $rpe.addEventListener('click', async () => {
+    const r = await fetchWithRefresh('/api/premium-trigger/restrike?side=pe', { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) $err.textContent = j.message || j.error || 'restrike PE failed';
+    refresh();
+  });
+
+  // Auto-restrike toggle — POSTs the same /settings endpoint the full
+  // settings page uses. We send only the one field so other config
+  // values stay untouched. The checkbox state is re-synced from the
+  // server on every /status refresh so UI never drifts from truth.
+  const $autoRestrike = document.getElementById('autoRestrikeToggle');
+  $autoRestrike.addEventListener('change', async () => {
+    const on = $autoRestrike.checked;
+    const r = await fetchWithRefresh('/api/premium-trigger/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoRestrikeOnDrift: on }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      $err.textContent = j.message || j.error || 'failed to update auto-restrike';
+      $autoRestrike.checked = !on;  // revert on failure
+    } else {
+      $err.textContent = '';
+    }
+    refresh();
+  });
+
+  refresh();
+  // 500ms refresh — server-side REST poll runs at MARKET_DATA_POLL_MS
+  // (default 1000ms), but pulling at half that cadence keeps the LTP
+  // visibly fresh even when one fetch happens to land between polls.
+  setInterval(refresh, 500);
+});
+</script>
+
+<%- include('partials/footer') %>

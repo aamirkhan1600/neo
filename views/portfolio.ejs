@@ -1,0 +1,283 @@
+<%- include('partials/header') %>
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="mb-0">Portfolio</h1>
+  <button id="refreshBtn" class="btn-primary">
+    <span id="refreshLabel">Refresh</span>
+  </button>
+</div>
+
+<div class="grid gap-4 mb-5" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+  <div class="card">
+    <h3>Invested</h3>
+    <div id="sumInvested" class="mt-2 text-xl font-semibold tabular-nums">—</div>
+  </div>
+  <div class="card">
+    <h3>Current Value</h3>
+    <div id="sumCurrent" class="mt-2 text-xl font-semibold tabular-nums">—</div>
+  </div>
+  <div class="card">
+    <h3>Total P&amp;L</h3>
+    <div id="sumPnl" class="mt-2 text-xl font-semibold tabular-nums">—</div>
+    <div id="sumPnlPct" class="text-xs muted mt-0.5">&nbsp;</div>
+  </div>
+  <div class="card">
+    <h3>Holdings</h3>
+    <div id="sumCount" class="mt-2 text-xl font-semibold tabular-nums">—</div>
+    <div class="text-xs muted mt-0.5">unique scrips</div>
+  </div>
+</div>
+
+<div class="card overflow-hidden p-0 mb-5">
+  <div class="flex items-center justify-between px-5 py-3 border-b border-line">
+    <h2>Holdings</h2>
+    <span id="holdingsMeta" class="text-xs muted"></span>
+  </div>
+  <div class="overflow-auto">
+    <table id="holdingsTable">
+      <thead class="bg-surface-muted">
+        <tr>
+          <th>Instrument</th>
+          <th>Sector</th>
+          <th class="text-right">Qty</th>
+          <th class="text-right">Avg Price</th>
+          <th class="text-right">LTP</th>
+          <th class="text-right">Invested</th>
+          <th class="text-right">Current Value</th>
+          <th class="text-right">P&amp;L</th>
+          <th class="text-right">Change %</th>
+        </tr>
+      </thead>
+      <tbody id="holdingsBody">
+        <tr><td colspan="9" class="center muted py-8">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card overflow-hidden p-0">
+  <div class="flex items-center justify-between px-5 py-3 border-b border-line">
+    <h2>Positions</h2>
+    <span id="positionsMeta" class="text-xs muted"></span>
+  </div>
+  <div class="overflow-auto">
+    <table id="positionsTable">
+      <thead class="bg-surface-muted">
+        <tr>
+          <th>Symbol</th>
+          <th>Product</th>
+          <th>Exchange</th>
+          <th class="text-right">Net Qty</th>
+          <th class="text-right">Buy Qty</th>
+          <th class="text-right">Sell Qty</th>
+          <th class="text-right">Avg Buy</th>
+          <th class="text-right">Avg Sell</th>
+          <th class="text-right">LTP</th>
+          <th class="text-right">M2M / P&amp;L</th>
+        </tr>
+      </thead>
+      <tbody id="positionsBody">
+        <tr><td colspan="10" class="center muted py-8">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  const INR = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+  const INT = new Intl.NumberFormat('en-IN');
+
+  function num(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  function fmtMoney(v) {
+    const n = num(v);
+    return n === null ? '—' : '₹' + INR.format(n);
+  }
+  function fmtNum(v) {
+    const n = num(v);
+    return n === null ? '—' : INT.format(n);
+  }
+  function fmtPct(v) {
+    const n = num(v);
+    return n === null ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+  }
+  function pnlClass(v) {
+    const n = num(v);
+    if (n === null || n === 0) return '';
+    return n > 0 ? 'pnl-pos' : 'pnl-neg';
+  }
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+  function emptyRow(cols, msg) {
+    return `<tr><td colspan="${cols}" class="center muted py-8">${escapeHtml(msg)}</td></tr>`;
+  }
+
+  function renderHoldings(payload) {
+    const body = document.getElementById('holdingsBody');
+    const meta = document.getElementById('holdingsMeta');
+    const rows = Array.isArray(payload?.data) ? payload.data
+               : Array.isArray(payload) ? payload : [];
+
+    if (!rows.length) {
+      const msg = payload?.errMsg || payload?.desc || 'No holdings.';
+      body.innerHTML = emptyRow(9, msg);
+      meta.textContent = '';
+      return { invested: 0, current: 0, count: 0 };
+    }
+
+    let invested = 0, current = 0;
+    const html = rows.map((r) => {
+      const qty   = num(r.quantity);
+      const avg   = num(r.averagePrice);
+      const ltp   = num(r.closingPrice ?? r.prevDayLtp);
+      const inv   = num(r.holdingCost) ?? (qty != null && avg != null ? qty * avg : null);
+      const mkt   = num(r.mktValue)    ?? (qty != null && ltp != null ? qty * ltp : null);
+      const pnl   = num(r.unrealisedGainLoss) ?? (mkt != null && inv != null ? mkt - inv : null);
+      const pct   = (pnl != null && inv) ? (pnl / inv) * 100 : null;
+
+      if (inv != null) invested += inv;
+      if (mkt != null) current  += mkt;
+
+      return `
+        <tr>
+          <td>
+            <div class="font-medium">${escapeHtml(r.instrumentName || r.commonScripCode || '—')}</div>
+            <div class="text-[11px] muted">${escapeHtml(r.commonScripCode || '')}${r.instrumentType ? ' · ' + escapeHtml(r.instrumentType) : ''}</div>
+          </td>
+          <td class="text-xs text-ink-700">${escapeHtml(r.sector || '—')}</td>
+          <td class="text-right tabular-nums">${fmtNum(qty)}</td>
+          <td class="text-right tabular-nums">${avg != null ? INR.format(avg) : '—'}</td>
+          <td class="text-right tabular-nums">${ltp != null ? INR.format(ltp) : '—'}</td>
+          <td class="text-right tabular-nums">${fmtMoney(inv)}</td>
+          <td class="text-right tabular-nums">${fmtMoney(mkt)}</td>
+          <td class="text-right tabular-nums ${pnlClass(pnl)}">${fmtMoney(pnl)}</td>
+          <td class="text-right tabular-nums ${pnlClass(pct)}">${fmtPct(pct)}</td>
+        </tr>`;
+    }).join('');
+
+    body.innerHTML = html;
+    meta.textContent = `${rows.length} scrip${rows.length === 1 ? '' : 's'}`;
+    return { invested, current, count: rows.length };
+  }
+
+  function renderPositions(payload) {
+    const body = document.getElementById('positionsBody');
+    const meta = document.getElementById('positionsMeta');
+    const rows = Array.isArray(payload?.data) ? payload.data
+               : Array.isArray(payload) ? payload : [];
+
+    if (!rows.length) {
+      const msg = payload?.errMsg || payload?.desc || 'No open positions.';
+      body.innerHTML = emptyRow(10, msg);
+      meta.textContent = '';
+      return { mtm: 0, count: 0 };
+    }
+
+    let mtmTotal = 0;
+    const html = rows.map((r) => {
+      const sym       = r.trdSym || r.sym || r.symbol || r.tradingSymbol || '—';
+      const product   = r.prdt || r.product || '—';
+      const exch      = r.exSeg || r.exchange || r.exch || '';
+      const buyQty    = num(r.flBuyQty ?? r.buyQty ?? r.flBuy);
+      const sellQty   = num(r.flSellQty ?? r.sellQty ?? r.flSell);
+      const cfBuy     = num(r.cfBuyQty) || 0;
+      const cfSell    = num(r.cfSellQty) || 0;
+      const buyTotal  = (buyQty || 0) + cfBuy;
+      const sellTotal = (sellQty || 0) + cfSell;
+      const netQty    = buyTotal - sellTotal;
+      const buyAmt    = num(r.buyAmt);
+      const sellAmt   = num(r.sellAmt);
+      const avgBuy    = buyAmt && buyTotal ? buyAmt / buyTotal : num(r.buyAvgPrc);
+      const avgSell   = sellAmt && sellTotal ? sellAmt / sellTotal : num(r.sellAvgPrc);
+      const ltp       = num(r.lstTrdPrc ?? r.ltp);
+      const mtm       = num(r.urMtm ?? r.mtm ?? r.rpnl);
+
+      if (mtm != null) mtmTotal += mtm;
+
+      const sideClass = netQty > 0 ? 'pill-ok' : netQty < 0 ? 'pill-bad' : 'pill-mute';
+      const sideLabel = netQty > 0 ? 'LONG' : netQty < 0 ? 'SHORT' : 'FLAT';
+
+      return `
+        <tr>
+          <td>
+            <div class="font-medium">${escapeHtml(sym)}</div>
+            <span class="pill ${sideClass} mt-1">${sideLabel}</span>
+          </td>
+          <td class="text-xs">${escapeHtml(product)}</td>
+          <td class="text-xs muted">${escapeHtml(exch)}</td>
+          <td class="text-right tabular-nums font-medium">${fmtNum(netQty)}</td>
+          <td class="text-right tabular-nums">${fmtNum(buyTotal)}</td>
+          <td class="text-right tabular-nums">${fmtNum(sellTotal)}</td>
+          <td class="text-right tabular-nums">${avgBuy != null ? INR.format(avgBuy) : '—'}</td>
+          <td class="text-right tabular-nums">${avgSell != null ? INR.format(avgSell) : '—'}</td>
+          <td class="text-right tabular-nums">${ltp != null ? INR.format(ltp) : '—'}</td>
+          <td class="text-right tabular-nums ${pnlClass(mtm)}">${fmtMoney(mtm)}</td>
+        </tr>`;
+    }).join('');
+
+    body.innerHTML = html;
+    meta.textContent = `${rows.length} position${rows.length === 1 ? '' : 's'}`;
+    return { mtm: mtmTotal, count: rows.length };
+  }
+
+  function renderSummary(h, p) {
+    document.getElementById('sumInvested').textContent = fmtMoney(h.invested);
+    document.getElementById('sumCurrent').textContent  = fmtMoney(h.current);
+
+    const totalPnl = (h.current - h.invested) + (p.mtm || 0);
+    const pnlEl = document.getElementById('sumPnl');
+    pnlEl.textContent = fmtMoney(totalPnl);
+    pnlEl.className = 'mt-2 text-xl font-semibold tabular-nums ' + pnlClass(totalPnl);
+
+    const pctEl = document.getElementById('sumPnlPct');
+    if (h.invested > 0) {
+      const pct = ((h.current - h.invested) / h.invested) * 100;
+      pctEl.textContent = `Holdings ${fmtPct(pct)}` + (p.mtm ? ` · Positions M2M ${fmtMoney(p.mtm)}` : '');
+      pctEl.className = 'text-xs mt-0.5 ' + pnlClass(pct);
+    } else {
+      pctEl.textContent = p.mtm ? `Positions M2M ${fmtMoney(p.mtm)}` : ' ';
+      pctEl.className = 'text-xs mt-0.5 ' + pnlClass(p.mtm);
+    }
+
+    document.getElementById('sumCount').textContent = String(h.count);
+  }
+
+  async function load() {
+    const btn = document.getElementById('refreshBtn');
+    const label = document.getElementById('refreshLabel');
+    btn.disabled = true;
+    label.textContent = 'Refreshing…';
+
+    document.getElementById('holdingsBody').innerHTML = emptyRow(9, 'Loading…');
+    document.getElementById('positionsBody').innerHTML = emptyRow(10, 'Loading…');
+
+    try {
+      const [pRes, hRes] = await Promise.allSettled([
+        fetch('/api/reports/positions', { credentials: 'include' }).then(r => r.json()),
+        fetch('/api/reports/holdings',  { credentials: 'include' }).then(r => r.json()),
+      ]);
+
+      const hSummary = hRes.status === 'fulfilled'
+        ? renderHoldings(hRes.value)
+        : (document.getElementById('holdingsBody').innerHTML = emptyRow(9, 'Failed to load holdings.'), { invested: 0, current: 0, count: 0 });
+
+      const pSummary = pRes.status === 'fulfilled'
+        ? renderPositions(pRes.value)
+        : (document.getElementById('positionsBody').innerHTML = emptyRow(10, 'Failed to load positions.'), { mtm: 0, count: 0 });
+
+      renderSummary(hSummary, pSummary);
+    } finally {
+      btn.disabled = false;
+      label.textContent = 'Refresh';
+    }
+  }
+
+  document.getElementById('refreshBtn').addEventListener('click', load);
+  load();
+</script>
+<%- include('partials/footer') %>

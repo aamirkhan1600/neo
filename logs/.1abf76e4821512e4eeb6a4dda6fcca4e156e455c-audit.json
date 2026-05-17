@@ -1,0 +1,25 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "C:\\Users\\Atlas\\PR\\studentcount\\kotak-neo-saas\\logs\\.1abf76e4821512e4eeb6a4dda6fcca4e156e455c-audit.json",
+    "files": [
+        {
+            "date": 1777619316163,
+            "name": "C:\\Users\\Atlas\\PR\\studentcount\\kotak-neo-saas\\logs\\error-2026-05-01.log",
+            "hash": "9430dc8b358befc0a8103005cc86eae419b199ca9680410339ccf3cea8afdd7e"
+        },
+        {
+            "date": 1777814585668,
+            "name": "C:\\Users\\Atlas\\PR\\studentcount\\kotak-neo-saas\\logs\\error-2026-05-03.log",
+            "hash": "33c8bb64eba8218ffc945166e6b2e4c888cf181b2854c4980436ee181d24d016"
+        },
+        {
+            "date": 1778393077963,
+            "name": "C:\\Users\\Atlas\\PR\\studentcount\\kotak-neo-saas\\logs\\error-2026-05-10.log",
+            "hash": "24d0d3ff63ee9269ef9227eff5b1624f29c8d72c53d90d5f400ae418b27d1ea3"
+        }
+    ],
+    "hashType": "sha256"
+}

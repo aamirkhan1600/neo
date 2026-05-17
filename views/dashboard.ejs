@@ -1,0 +1,98 @@
+<%- include('partials/header') %>
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="mb-0">Dashboard</h1>
+  <span class="text-xs text-ink-500">Live data refreshes every 2s</span>
+</div>
+
+<section class="grid-cards">
+  <div class="card">
+    <div class="flex items-center justify-between mb-2">
+      <h2>Broker</h2>
+      <% if (broker && broker.status === 'CONNECTED') { %>
+        <span class="pill pill-ok">CONNECTED</span>
+      <% } else { %>
+        <span class="pill pill-bad"><%= broker ? broker.status : 'NOT CONNECTED' %></span>
+      <% } %>
+    </div>
+    <% if (broker && broker.status === 'CONNECTED') { %>
+      <table class="kv">
+        <tr><th>UCC</th><td><%= broker.ucc || '—' %></td></tr>
+        <tr><th>Last login</th><td><%= broker.last_login_at ? new Date(broker.last_login_at).toLocaleString() : '—' %></td></tr>
+      </table>
+    <% } else { %>
+      <p class="muted mb-3">Connect Kotak Neo to start trading.</p>
+      <a href="/broker" class="btn-primary">Connect Kotak Neo</a>
+    <% } %>
+  </div>
+
+  <div class="card">
+    <h2 class="mb-2">Live Tape</h2>
+    <p class="muted text-xs mb-2">Subscribe to a token (e.g. NSE token id):</p>
+    <div class="flex gap-2 mb-3">
+      <input id="symInput" placeholder="11536" class="flex-1" />
+      <button id="subBtn" class="btn-primary shrink-0">Subscribe</button>
+    </div>
+    <div class="overflow-auto -mx-2">
+      <table class="ticks">
+        <thead><tr><th>Symbol</th><th>LTP</th><th>Updated</th></tr></thead>
+        <tbody id="ticks"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="ptWidget">
+    <div class="flex items-center justify-between mb-2">
+      <h2>Premium Trigger</h2>
+      <p id="ptStatus" class="muted text-xs">loading…</p>
+    </div>
+    <table class="kv">
+      <tr><th>CE</th><td id="ptCe">—</td></tr>
+      <tr><th>PE</th><td id="ptPe">—</td></tr>
+      <tr><th>Realised P&amp;L</th><td id="ptReal">—</td></tr>
+      <tr><th>Unrealised</th><td id="ptUnreal">—</td></tr>
+    </table>
+    <div class="mt-4 flex gap-2">
+      <a href="/premium-trigger" class="btn-primary">Open dashboard</a>
+      <a href="/premium-trigger/settings" class="btn">Settings</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="mb-2">Queue</h2>
+    <pre id="queueStats" class="text-[11px] max-h-64">loading…</pre>
+  </div>
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const $st = document.getElementById('ptStatus');
+  const fmtMoney = (v) => v == null ? '—' : (v >= 0 ? '₹' : '-₹') + Math.abs(v).toFixed(2);
+  function legLine(s) {
+    if (!s.symbol) return '—';
+    const pos = s.position === 'SHORT' ? `<span class="bad font-semibold">SHORT @ ${Number(s.entryPrice).toFixed(2)}</span>` : '<span class="muted">flat</span>';
+    const ltp = s.ltp != null ? Number(s.ltp).toFixed(2) : '—';
+    return `${s.symbol} · LTP ${ltp} · ${pos}`;
+  }
+  async function refresh() {
+    try {
+      const r = await fetch('/api/premium-trigger/status', { credentials: 'include' });
+      if (!r.ok) { $st.textContent = 'unauthenticated or service down'; return; }
+      const s = await r.json();
+      const modeStr = (s.cfg.mode === 'live')
+        ? '<span class="mode-pill mode-live">LIVE</span>'
+        : '<span class="mode-pill mode-paper">PAPER</span>';
+      $st.innerHTML = s.running
+        ? `<span class="ok font-semibold">RUNNING</span> · ${modeStr} · ${s.cfg.underlyingName} ${s.cfg.expiry || 'auto'} · ${s.cfg.strikeMode}`
+        : (s.enabled ? `<span class="bad font-semibold">ENABLED but idle</span> · ${modeStr}` : `<span class="muted">disabled</span> · ${modeStr}`);
+      document.getElementById('ptCe').innerHTML = legLine(s.state.ce);
+      document.getElementById('ptPe').innerHTML = legLine(s.state.pe);
+      document.getElementById('ptReal').textContent = fmtMoney(s.totalRealized);
+      document.getElementById('ptUnreal').textContent = fmtMoney(s.totalUnrealized);
+    } catch (_) { $st.textContent = 'error'; }
+  }
+  refresh();
+  setInterval(refresh, 2000);
+});
+</script>
+
+<%- include('partials/footer') %>

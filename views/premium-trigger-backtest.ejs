@@ -1,0 +1,318 @@
+<%- include('partials/header') %>
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="mb-0">Premium Trigger — Backtest</h1>
+  <div class="flex gap-2">
+    <a href="/premium-trigger" class="btn">Back to dashboard</a>
+    <a href="/premium-trigger/settings" class="btn">Settings</a>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <p class="muted text-sm leading-relaxed mb-4">
+    Replay a recorded trading day through the SAME state machine that runs
+    live. Tick data was captured at 1 Hz per token while the strategy was
+    enabled (paper or live) on that date.
+  </p>
+
+  <div class="flex flex-wrap items-end gap-3">
+    <div>
+      <label>Date</label>
+      <select id="date" class="!w-56"><option value="">— pick a date —</option></select>
+    </div>
+    <button id="runBtn" class="btn-primary">Run backtest</button>
+    <span id="msg" class="muted text-sm"></span>
+  </div>
+  <p class="muted text-sm mt-3" id="cfgPreview"></p>
+
+  <hr class="my-5">
+
+  <details class="text-sm">
+    <summary class="cursor-pointer text-primary font-medium">Backfill from Kotak history (experimental)</summary>
+    <div class="pt-3 space-y-3">
+      <p class="muted leading-relaxed">
+        Try Kotak Neo's <strong class="text-ink-900">undocumented</strong> charts/historical endpoint
+        to import 1-minute OHLC bars for a past date and synthesise 4 ticks per
+        bar into <code class="bg-surface-sunk px-1 py-0.5 rounded text-xs">tick_history</code>.
+        <span class="text-amber-600 font-medium">Approximate</span> —
+        the real intra-bar tick path is unknowable from OHLC alone, so backtest
+        results from imported data will be close but not exact. For exact
+        results, use the live recorder.
+      </p>
+      <p class="muted">Requires a previous session snapshot for that date (run premium-trigger paper at least once).</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <input id="importDate" type="date" class="!w-44" />
+        <button id="importBtn" class="btn-primary">Import bars</button>
+        <button id="diagBtn" type="button" class="btn-secondary">Diag</button>
+        <span id="importMsg" class="muted text-sm"></span>
+      </div>
+      <pre id="diagOut" class="hidden max-h-60 overflow-auto text-[11px]"></pre>
+    </div>
+  </details>
+</div>
+
+<section class="card mb-4 hidden" id="resultCard">
+  <h2 class="mb-3">Result</h2>
+  <div id="summary" class="grid gap-3 tabular-nums" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))"></div>
+  <canvas id="equityCanvas" width="900" height="220" class="w-full h-[220px] my-3 bg-surface-sunk border border-line rounded-md"></canvas>
+  <h3 class="mt-5 mb-2">Trades</h3>
+  <div class="overflow-auto max-h-[380px]">
+    <table class="signals">
+      <thead><tr><th>Entry time</th><th>Exit time</th><th>Side</th><th>Reason</th><th class="text-right">Entry</th><th class="text-right">Exit</th><th class="text-right">Qty</th><th class="text-right">Points</th><th class="text-right">P&amp;L</th></tr></thead>
+      <tbody id="trades"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2 class="mb-3">Recent runs</h2>
+  <div class="overflow-auto">
+    <table class="signals">
+      <thead><tr><th>When</th><th>Date</th><th class="text-right">Trades</th><th class="text-right">Win %</th><th class="text-right">Gross P&amp;L</th><th class="text-right">Max DD</th><th></th></tr></thead>
+      <tbody id="runs"><tr><td colspan="7" class="muted center py-6">No backtest runs yet.</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<style type="text/tailwindcss">
+  @layer components {
+    table.signals { @apply w-full text-[13px]; }
+    table.signals th, table.signals td { @apply px-2 py-1.5 border-b border-line text-left align-middle; }
+    table.signals thead th { @apply bg-surface-muted text-xs uppercase tracking-wider text-ink-500 font-semibold; }
+    .summary-tile { @apply bg-surface-muted border border-line rounded-md p-3; }
+    .summary-tile .lbl { @apply text-[11px] uppercase tracking-wider text-ink-500; }
+    .summary-tile strong { @apply text-base; }
+  }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const $date = document.getElementById('date');
+  const $msg = document.getElementById('msg');
+  const $run = document.getElementById('runBtn');
+  const $cfgPreview = document.getElementById('cfgPreview');
+  const $result = document.getElementById('resultCard');
+  const $summary = document.getElementById('summary');
+  const $trades = document.getElementById('trades');
+  const $runs = document.getElementById('runs');
+  const $canvas = document.getElementById('equityCanvas');
+  const fmtMoney = (v) => v == null ? '—' : (v >= 0 ? '₹' : '-₹') + Math.abs(v).toFixed(2);
+  const fmtTime = (t) => t ? new Date(t).toLocaleTimeString() : '—';
+  const fmtDate = (t) => t ? new Date(t).toLocaleString() : '—';
+
+  function setMsg(s, isErr) {
+    $msg.textContent = s || '';
+    $msg.className = 'text-sm ' + (isErr ? 'bad' : 'muted');
+  }
+
+  async function loadDates() {
+    const r = await fetch('/api/premium-trigger/backtest/dates', { credentials: 'include' });
+    const list = r.ok ? await r.json() : [];
+    $date.innerHTML = '<option value="">— pick a date —</option>'
+      + list.map(d => `<option value="${d.date}">${d.date} (${d.ticks.toLocaleString()} ticks)</option>`).join('');
+    if (!list.length) {
+      $cfgPreview.innerHTML = `
+        <strong class="text-amber-600">No tick history recorded yet.</strong><br>
+        Backtests need real recorded data — there's no historical-tick API on Kotak Neo to backfill from.
+        Three ways to start filling the database:
+        <ol class="mt-1 ml-5 list-decimal leading-relaxed">
+          <li>Open <a href="/option-chain" class="text-primary">/option-chain</a> during market hours (9:15–15:30 IST). Every 2s poll records the visible strikes' LTPs.</li>
+          <li>Run premium-trigger in <strong class="text-ink-900">Paper</strong> mode (no real orders) on the live dashboard. Its CE+PE+spot ticks get recorded.</li>
+          <li>Or just leave premium-trigger running live; the recorder writes for any active strategy.</li>
+        </ol>
+        Come back here after one trading session and the date will appear.`;
+    } else {
+      $cfgPreview.textContent = '';
+    }
+  }
+
+  async function loadRuns() {
+    const r = await fetch('/api/premium-trigger/backtest/runs', { credentials: 'include' });
+    const list = r.ok ? await r.json() : [];
+    if (!list.length) {
+      $runs.innerHTML = '<tr><td colspan="7" class="muted center py-6">No backtest runs yet.</td></tr>';
+      return;
+    }
+    $runs.innerHTML = list.map(row => {
+      const s = typeof row.summary === 'string' ? JSON.parse(row.summary) : (row.summary || {});
+      const pnl = Number(s.grossPnl);
+      const cls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+      const date = row.trade_date instanceof Date ? row.trade_date.toISOString().slice(0, 10) : String(row.trade_date).slice(0, 10);
+      return `<tr>
+        <td class="text-xs text-ink-500">${fmtDate(row.created_at)}</td>
+        <td>${date}</td>
+        <td class="text-right tabular-nums">${s.trades || 0}</td>
+        <td class="text-right tabular-nums">${s.accuracy != null ? s.accuracy.toFixed(1) + '%' : '—'}</td>
+        <td class="text-right tabular-nums ${cls} font-semibold">${fmtMoney(s.grossPnl)}</td>
+        <td class="text-right tabular-nums">${fmtMoney(s.maxDrawdown)}</td>
+        <td><button data-id="${row.id}" class="view-run btn !text-xs !px-2 !py-1">View</button></td>
+      </tr>`;
+    }).join('');
+    $runs.querySelectorAll('.view-run').forEach(b => b.addEventListener('click', () => loadRun(b.dataset.id)));
+  }
+
+  function drawEquity(equity) {
+    const ctx = $canvas.getContext('2d');
+    const w = $canvas.width, h = $canvas.height;
+    // Match the surface-sunk Tailwind color (#f3f4f6) so the canvas blends in.
+    ctx.fillStyle = '#f3f4f6'; ctx.fillRect(0, 0, w, h);
+    if (!equity || !equity.length) {
+      ctx.fillStyle = '#6b7280'; ctx.font = '13px Inter, sans-serif';
+      ctx.fillText('No trades to chart.', 20, 30);
+      return;
+    }
+    const padX = 40, padY = 18;
+    const xs = equity.map(p => p.t);
+    const ys = equity.map(p => p.pnl);
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const yMin = Math.min(0, ...ys), yMax = Math.max(0, ...ys);
+    const xR = xMax - xMin || 1, yR = yMax - yMin || 1;
+    const fx = (t) => padX + ((t - xMin) / xR) * (w - padX * 2);
+    const fy = (v) => h - padY - ((v - yMin) / yR) * (h - padY * 2);
+    // zero line
+    ctx.strokeStyle = '#d1d5db'; ctx.beginPath();
+    ctx.moveTo(padX, fy(0)); ctx.lineTo(w - padX, fy(0)); ctx.stroke();
+    // line
+    ctx.strokeStyle = '#387ed1'; ctx.lineWidth = 2; ctx.beginPath();
+    equity.forEach((p, i) => i === 0 ? ctx.moveTo(fx(p.t), fy(p.pnl)) : ctx.lineTo(fx(p.t), fy(p.pnl)));
+    ctx.stroke();
+    // y-axis labels
+    ctx.fillStyle = '#6b7280'; ctx.font = '11px Inter, sans-serif';
+    ctx.fillText(yMax.toFixed(0), 4, padY + 8);
+    ctx.fillText(yMin.toFixed(0), 4, h - padY);
+    ctx.fillText('0', 4, fy(0) + 4);
+  }
+
+  function renderResult(r) {
+    $result.classList.remove('hidden');
+    const s = r.summary || {};
+    const pnlCls = (s.grossPnl || 0) >= 0 ? 'pnl-pos' : 'pnl-neg';
+    $summary.innerHTML = [
+      ['Trades', `${s.trades || 0}`],
+      ['Wins / Losses', `${s.wins || 0} / ${s.losses || 0}`],
+      ['Win %', s.accuracy != null ? s.accuracy.toFixed(1) + '%' : '—'],
+      ['Gross P&L', `<span class="${pnlCls} font-semibold">${fmtMoney(s.grossPnl)}</span>`],
+      ['Realised P&L', fmtMoney(s.realizedPnl)],
+      ['Charges', fmtMoney(s.totalCharges)],
+      ['Max DD', fmtMoney(s.maxDrawdown)],
+      ['Ticks', (r.tickCount || 0).toLocaleString()],
+      ['Runtime', `${r.durationMs || r.duration_ms || '—'} ms`],
+    ].map(([lbl, val]) => `<div class="summary-tile"><div class="lbl">${lbl}</div><strong>${val}</strong></div>`).join('');
+    drawEquity(r.equity);
+    const trades = r.trades || [];
+    if (!trades.length) {
+      $trades.innerHTML = '<tr><td colspan="9" class="muted center py-6">No trades — strategy never fired.</td></tr>';
+    } else {
+      $trades.innerHTML = trades.map(t => {
+        const cls = t.grossPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+        const sideCls = String(t.side).toLowerCase() === 'ce' ? 'ce-head' : 'pe-head';
+        return `<tr>
+          <td class="text-xs">${fmtTime(t.entryAt)}</td>
+          <td class="text-xs">${fmtTime(t.exitAt)}</td>
+          <td class="${sideCls} font-semibold uppercase">${t.side}</td>
+          <td>${t.reason}</td>
+          <td class="text-right tabular-nums">${Number(t.entryPrice).toFixed(2)}</td>
+          <td class="text-right tabular-nums">${Number(t.exitPrice).toFixed(2)}</td>
+          <td class="text-right tabular-nums">${t.qty}</td>
+          <td class="text-right tabular-nums ${cls}">${t.points >= 0 ? '+' : ''}${t.points.toFixed(2)}</td>
+          <td class="text-right tabular-nums ${cls} font-semibold">${fmtMoney(t.grossPnl)}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
+  async function loadRun(id) {
+    setMsg('Loading run…');
+    const r = await fetch('/api/premium-trigger/backtest/runs/' + id, { credentials: 'include' });
+    if (!r.ok) { setMsg('Load failed', true); return; }
+    const j = await r.json();
+    setMsg('');
+    renderResult(j.result);
+  }
+
+  $run.addEventListener('click', async () => {
+    const date = $date.value;
+    if (!date) { setMsg('Pick a date first.', true); return; }
+    setMsg('Running backtest…');
+    $run.disabled = true;
+    try {
+      const r = await fetch('/api/premium-trigger/backtest/run', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', body: JSON.stringify({ date }),
+      });
+      const j = await r.json();
+      if (!r.ok) { setMsg(j.message || j.error || 'Run failed', true); return; }
+      setMsg(`Done in ${j.durationMs} ms`);
+      renderResult(j);
+      loadRuns();
+    } catch (err) { setMsg(err.message, true); }
+    finally { $run.disabled = false; }
+  });
+
+  $date.addEventListener('change', () => {
+    $cfgPreview.textContent = $date.value
+      ? `Will replay using your currently-saved settings against ${$date.value}'s recorded ticks. Mode is forced to PAPER for safety.`
+      : '';
+  });
+
+  // Backfill from Kotak charts API
+  const $importBtn = document.getElementById('importBtn');
+  const $importDate = document.getElementById('importDate');
+  const $importMsg = document.getElementById('importMsg');
+  if ($importBtn) {
+    $importBtn.addEventListener('click', async () => {
+      const date = $importDate.value;
+      if (!date) { $importMsg.textContent = 'Pick a date.'; $importMsg.className = 'bad text-sm'; return; }
+      $importBtn.disabled = true;
+      $importMsg.textContent = 'Calling Kotak charts endpoint…';
+      $importMsg.className = 'muted text-sm';
+      try {
+        const r = await fetch('/api/premium-trigger/backtest/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          credentials: 'include', body: JSON.stringify({ date }),
+        });
+        const j = await r.json();
+        if (r.ok) {
+          let msg = `Imported ${j.ticksWritten.toLocaleString()} ticks for ${j.tokens} token(s).`;
+          if (j.autoResolved) {
+            const spot = j.resolvedFromSpot ? ` from spot ${Number(j.resolvedFromSpot).toFixed(2)}` : '';
+            msg += ` Auto-picked strike ${j.resolvedStrike}${spot} for expiry ${j.expiry}.`;
+          }
+          $importMsg.textContent = msg;
+          $importMsg.className = 'ok text-sm';
+          loadDates();
+        } else {
+          $importMsg.textContent = j.message || j.error || 'Import failed.';
+          $importMsg.className = 'bad text-sm';
+        }
+      } catch (err) {
+        $importMsg.textContent = err.message;
+        $importMsg.className = 'bad text-sm';
+      } finally { $importBtn.disabled = false; }
+    });
+  }
+
+  const $diagBtn = document.getElementById('diagBtn');
+  const $diagOut = document.getElementById('diagOut');
+  if ($diagBtn) {
+    $diagBtn.addEventListener('click', async () => {
+      $diagBtn.disabled = true;
+      $diagOut.classList.remove('hidden');
+      $diagOut.textContent = 'Probing each charts URL shape …';
+      try {
+        const date = $importDate.value || '';
+        const qs = date ? ('?date=' + encodeURIComponent(date)) : '';
+        const r = await fetch('/api/premium-trigger/backtest/diag' + qs, { credentials: 'include' });
+        const j = await r.json();
+        $diagOut.textContent = JSON.stringify(j, null, 2);
+      } catch (err) {
+        $diagOut.textContent = 'diag failed: ' + err.message;
+      } finally { $diagBtn.disabled = false; }
+    });
+  }
+
+  loadDates();
+  loadRuns();
+});
+</script>
+
+<%- include('partials/footer') %>

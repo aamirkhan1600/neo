@@ -1,0 +1,52 @@
+<%- include('partials/header') %>
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="mb-0">Order Book</h1>
+  <button id="syncBtn" class="btn-primary">Sync from Broker</button>
+</div>
+
+<div class="card overflow-hidden p-0">
+  <div class="overflow-auto">
+    <table>
+      <thead class="bg-surface-muted">
+        <tr>
+          <th>ID</th><th>Symbol</th><th>Side</th><th class="text-right">Qty</th>
+          <th>Type</th><th>Status</th><th>Broker ID</th><th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+      <% (orders || []).forEach(function(o){ %>
+        <tr id="order-<%= o.id %>">
+          <td class="font-mono text-xs"><%= o.id %></td>
+          <td class="font-medium"><%= o.symbol %></td>
+          <td>
+            <% if (o.side === 'BUY') { %>
+              <span class="pill pill-ok">BUY</span>
+            <% } else { %>
+              <span class="pill pill-bad">SELL</span>
+            <% } %>
+          </td>
+          <td class="text-right tabular-nums"><%= o.qty %></td>
+          <td><%= o.order_type %></td>
+          <td>
+            <% var st = (o.status || '').toLowerCase(); var cls = st.includes('reject') ? 'pill-bad' : st.includes('complete') || st.includes('placed') ? 'pill-ok' : 'pill-mute'; %>
+            <span class="pill <%= cls %>"><%= o.status %></span>
+          </td>
+          <td class="font-mono text-xs text-ink-500"><%= o.broker_order_id || '—' %></td>
+          <td class="text-ink-500 text-xs"><%= new Date(o.created_at).toLocaleString() %></td>
+        </tr>
+      <% }); %>
+      <% if (!(orders && orders.length)) { %>
+        <tr><td colspan="8" class="center muted py-8">No orders yet.</td></tr>
+      <% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  document.getElementById('syncBtn').addEventListener('click', async () => {
+    await fetch('/api/orders/sync', { method: 'POST', credentials: 'include' });
+    setTimeout(() => location.reload(), 1500);
+  });
+</script>
+<%- include('partials/footer') %>

@@ -1,0 +1,13 @@
+/* Tailwind (loaded via CDN in views/partials/header.ejs) provides the
+ * design system. This file is intentionally minimal — only fallbacks
+ * that must apply before the CDN script finishes downloading.
+ */
+:root {
+  --primary: #387ed1;
+  --line: #e5e7eb;
+  --ink-900: #1c1f23;
+  --bg: #f9fafb;
+}
+html, body { background: var(--bg); color: var(--ink-900); }
+body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+* { box-sizing: border-box; }

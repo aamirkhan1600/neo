@@ -1,0 +1,69 @@
+<%- include('partials/header') %>
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="mb-0">Broker Connect</h1>
+  <span class="text-sm text-ink-500">Kotak&nbsp;Neo Trade API</span>
+</div>
+
+<div class="card max-w-2xl">
+  <div class="flex items-center gap-2 mb-3">
+    <span class="text-xs uppercase tracking-wider text-ink-500">Status</span>
+    <% if (broker && broker.status === 'CONNECTED') { %>
+      <span class="pill pill-ok"><%= broker.status %></span>
+    <% } else { %>
+      <span class="pill pill-bad"><%= broker ? broker.status : 'NOT CONNECTED' %></span>
+    <% } %>
+  </div>
+
+  <p class="muted text-sm mb-5 leading-relaxed">
+    Two-step Trade API login: <strong class="text-ink-900">(1)</strong> Mobile + UCC + current TOTP →
+    issues a view token and sid; <strong class="text-ink-900">(2)</strong> MPIN → issues the Trade
+    token and your per-user <code class="bg-surface-sunk px-1 py-0.5 rounded text-xs">baseUrl</code>. We never store mobile, UCC,
+    TOTP, or MPIN. Only the resulting Trade token, sid, and baseUrl are
+    persisted (AES-256-GCM encrypted).
+  </p>
+
+  <form id="brokerLoginForm" class="space-y-4">
+    <div>
+      <label>Mobile number (with country code)</label>
+      <input name="mobile" placeholder="+919876543210" required />
+    </div>
+    <div>
+      <label>UCC (Client Code)</label>
+      <input name="ucc" placeholder="ABC123" required />
+    </div>
+    <div>
+      <label>TOTP (6-digit, current)</label>
+      <input name="totp" inputmode="numeric" maxlength="6" required autocomplete="one-time-code" placeholder="123456" />
+      <p class="text-xs text-ink-500 mt-1">From Google / Microsoft Authenticator. Refreshes every 30 seconds.</p>
+    </div>
+    <div>
+      <label>MPIN (6-digit static PIN)</label>
+      <input name="mpin" type="password" inputmode="numeric" maxlength="6" required />
+    </div>
+    <div class="pt-2">
+      <button type="submit" class="btn-primary">Connect</button>
+    </div>
+  </form>
+  <p id="err" class="error mt-3"></p>
+</div>
+
+<script>
+  document.getElementById('brokerLoginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = Object.fromEntries(fd);
+    const errEl = document.getElementById('err');
+    errEl.textContent = '';
+    const res = await fetch('/api/broker/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), credentials: 'include',
+    });
+    if (res.ok) location.reload();
+    else {
+      const j = await res.json().catch(() => ({}));
+      errEl.textContent = j.message || j.error || 'Login failed';
+    }
+  });
+</script>
+
+<%- include('partials/footer') %>

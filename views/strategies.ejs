@@ -1,0 +1,125 @@
+<%- include('partials/header') %>
+<h1>Strategies</h1>
+
+<div class="grid-cards">
+  <div class="card">
+    <h2 class="mb-4">Create</h2>
+    <form id="newStrat" class="space-y-3">
+      <div>
+        <label>Name</label>
+        <input name="name" required />
+      </div>
+      <div>
+        <label>Symbol (instrument token)</label>
+        <input name="symbol" required />
+      </div>
+      <div>
+        <label>Trading Symbol</label>
+        <input name="tradingSymbol" placeholder="RELIANCE-EQ" />
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label>Exchange</label>
+          <select name="exchange">
+            <option>NSE</option><option>BSE</option><option>NFO</option>
+          </select>
+        </div>
+        <div>
+          <label>Action</label>
+          <select name="action"><option>BUY</option><option>SELL</option></select>
+        </div>
+      </div>
+      <div>
+        <label>Condition</label>
+        <input name="condition" placeholder="price > 22000" required />
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label>Qty</label>
+          <input name="qty" type="number" min="1" required />
+        </div>
+        <div>
+          <label>Order type</label>
+          <select name="orderType"><option>MKT</option><option>L</option><option>SL</option><option>SL-M</option></select>
+        </div>
+        <div>
+          <label>Product</label>
+          <select name="product"><option>MIS</option><option>CNC</option><option>NRML</option></select>
+        </div>
+      </div>
+      <div>
+        <label>Cooldown (sec)</label>
+        <input name="cooldownSec" type="number" value="30" />
+      </div>
+      <label class="flex items-center gap-2 text-sm font-medium text-ink-700 mt-2">
+        <input name="is_active" type="checkbox" checked /> Active
+      </label>
+      <div class="pt-2">
+        <button type="submit" class="btn-primary">Save strategy</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 class="mb-3">Active</h2>
+    <div class="overflow-auto -mx-2">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Symbol</th><th>Active</th><th>Last run</th><th></th></tr></thead>
+        <tbody>
+        <% (strategies || []).forEach(function(s){ %>
+          <tr>
+            <td class="font-mono text-xs"><%= s.id %></td>
+            <td class="font-medium"><%= s.name %></td>
+            <td><%= s.symbol %></td>
+            <td>
+              <% if (s.is_active) { %>
+                <span class="pill pill-ok">YES</span>
+              <% } else { %>
+                <span class="pill pill-mute">NO</span>
+              <% } %>
+            </td>
+            <td class="text-xs text-ink-500"><%= s.last_run_at ? new Date(s.last_run_at).toLocaleString() : '—' %></td>
+            <td class="whitespace-nowrap">
+              <button data-id="<%= s.id %>" class="toggle btn-secondary !px-2 !py-1 !text-xs"><%= s.is_active ? 'Disable' : 'Enable' %></button>
+              <button data-id="<%= s.id %>" class="del btn-warn !px-2 !py-1 !text-xs">Delete</button>
+            </td>
+          </tr>
+        <% }); %>
+        <% if (!(strategies && strategies.length)) { %>
+          <tr><td colspan="6" class="center muted py-6">No strategies yet.</td></tr>
+        <% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.getElementById('newStrat').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = Object.fromEntries(fd);
+    body.is_active = !!body.is_active;
+    body.qty = Number(body.qty);
+    const res = await fetch('/api/strategies', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), credentials: 'include',
+    });
+    if (res.ok) location.reload();
+    else alert((await res.json()).message || 'Failed');
+  });
+  document.querySelectorAll('.toggle').forEach(b => b.addEventListener('click', async () => {
+    await fetch('/api/strategies/' + b.dataset.id + '/toggle', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: b.textContent === 'Enable' }), credentials: 'include',
+    });
+    location.reload();
+  }));
+  document.querySelectorAll('.del').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Delete strategy?')) return;
+    await fetch('/api/strategies/' + b.dataset.id, { method: 'DELETE', credentials: 'include' });
+    location.reload();
+  }));
+</script>
+
+<%- include('partials/footer') %>

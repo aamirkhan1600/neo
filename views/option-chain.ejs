@@ -1,0 +1,330 @@
+<%- include('partials/header') %>
+<h1>Option Chain</h1>
+
+<div class="card mb-4">
+  <div class="flex flex-wrap items-end gap-3">
+    <div>
+      <label>Underlying</label>
+      <select id="underlying" class="!w-auto min-w-[140px]">
+        <% (indices || []).forEach(function(u){ %>
+          <option value="<%= u %>"><%= u %></option>
+        <% }); %>
+      </select>
+    </div>
+    <div>
+      <label>Expiry</label>
+      <select id="expiry" class="!w-auto min-w-[160px]"><option>—</option></select>
+    </div>
+    <div>
+      <label>Strikes around ATM</label>
+      <select id="window" class="!w-auto min-w-[120px]">
+        <option value="10">±10</option>
+        <option value="15" selected>±15</option>
+        <option value="25">±25</option>
+        <option value="50">±50</option>
+        <option value="0">All</option>
+      </select>
+    </div>
+    <div>
+      <label>Qty (lots)</label>
+      <input id="qtyLots" type="number" min="1" value="1" class="!w-24" />
+    </div>
+    <button id="reloadBtn" class="btn-primary">Reload</button>
+    <button id="syncBtn" class="btn-secondary" title="Re-download Kotak's scrip master CSVs (slow)">Sync Master</button>
+    <span id="status" class="muted text-sm ml-auto"></span>
+  </div>
+
+  <div class="flex flex-wrap gap-x-6 gap-y-1 mt-4 text-sm">
+    <span class="muted">Lot size: <strong id="lotSize" class="text-ink-900 tabular-nums">—</strong></span>
+    <span class="muted">ATM strike: <strong id="atm" class="text-primary tabular-nums">—</strong></span>
+    <span class="muted">Spot LTP: <strong id="spot" class="text-ink-900 tabular-nums">—</strong></span>
+  </div>
+</div>
+
+<div class="card p-0 overflow-hidden">
+  <div class="oc-wrap overflow-auto max-h-[70vh]">
+    <table class="oc-table" id="ocTable">
+      <thead>
+        <tr>
+          <th colspan="4" class="ce-head text-center">CALL (CE)</th>
+          <th class="text-center text-primary">Strike</th>
+          <th colspan="4" class="pe-head text-center">PUT (PE)</th>
+        </tr>
+        <tr>
+          <th class="text-center">Buy</th>
+          <th class="text-center">Sell</th>
+          <th class="text-right">LTP</th>
+          <th>Symbol</th>
+          <th class="text-center">—</th>
+          <th>Symbol</th>
+          <th class="text-right">LTP</th>
+          <th class="text-center">Buy</th>
+          <th class="text-center">Sell</th>
+        </tr>
+      </thead>
+      <tbody id="ocBody">
+        <tr><td colspan="9" class="muted center py-8">Pick an underlying and expiry, then Reload.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style type="text/tailwindcss">
+  @layer components {
+    .oc-table { @apply w-full border-collapse text-[13px]; }
+    .oc-table th, .oc-table td { @apply px-2 py-1.5 text-center border-b border-line; }
+    .oc-table thead th { @apply sticky top-0 bg-surface-muted z-10 text-xs font-semibold text-ink-700; }
+    .oc-table tbody td.strike { @apply font-semibold text-primary; }
+    .oc-table tbody tr.atm { background: rgba(56, 126, 209, 0.08); }
+    .oc-table tbody tr.itm-ce td:nth-child(-n+4) { background: rgba(43, 191, 114, 0.06); }
+    .oc-table tbody tr.itm-pe td:nth-child(n+6) { background: rgba(246, 66, 60, 0.06); }
+    .oc-table .ltp { @apply tabular-nums; }
+    .oc-table .row-btn { @apply inline-flex items-center justify-center px-2 py-0.5 text-[11px] font-semibold rounded border transition; }
+    .oc-table .row-btn.buy { @apply bg-buy-soft text-buy border-buy/20 hover:bg-buy hover:text-white; }
+    .oc-table .row-btn.sell { @apply bg-sell-soft text-sell border-sell/20 hover:bg-sell hover:text-white; }
+  }
+</style>
+
+<script>
+// socket.io.js is loaded by the footer partial AFTER this script tag, so
+// defer initialisation until DOMContentLoaded.
+document.addEventListener('DOMContentLoaded', function () {
+  const socket = window.io ? io({ withCredentials: true }) : null;
+  const $u = document.getElementById('underlying');
+  const $e = document.getElementById('expiry');
+  const $w = document.getElementById('window');
+  const $q = document.getElementById('qtyLots');
+  const $body = document.getElementById('ocBody');
+  const $status = document.getElementById('status');
+  const $lot = document.getElementById('lotSize');
+  const $atm = document.getElementById('atm');
+  const $spot = document.getElementById('spot');
+
+  let currentChain = [];   // full unfiltered chain
+  let lotSize = null;
+  let segment = null;      // common segment (nse_fo or bse_fo)
+  let subscribed = new Set();
+  let ltpByToken = new Map();
+
+  function setStatus(s, isErr) {
+    $status.textContent = s || '';
+    $status.className = 'text-sm ml-auto ' + (isErr ? 'bad' : 'muted');
+  }
+
+  async function loadExpiries() {
+    const u = $u.value;
+    const r = await fetch('/api/option-chain/' + u + '/expiries', { credentials: 'include' });
+    const list = r.ok ? await r.json() : [];
+    $e.innerHTML = list.length
+      ? list.map(d => '<option value="' + d + '">' + d + '</option>').join('')
+      : '<option>—</option>';
+  }
+
+  async function loadChain() {
+    const u = $u.value;
+    const ex = $e.value;
+    if (!u || !ex || ex === '—') return;
+    setStatus('Loading…');
+    const r = await fetch('/api/option-chain/' + u + '?expiry=' + encodeURIComponent(ex), { credentials: 'include' });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      setStatus(j.hint || j.error || 'Load failed', true);
+      $body.innerHTML = '<tr><td colspan="9" class="muted center py-6">' +
+        (j.hint || j.error || 'No data — run Sync Master.') + '</td></tr>';
+      return;
+    }
+    const data = await r.json();
+    currentChain = data.chain || [];
+    lotSize = data.lotSize || (currentChain[0]?.ce?.lotSize) || null;
+    segment = currentChain[0]?.ce?.exchangeSegment || currentChain[0]?.pe?.exchangeSegment || 'nse_fo';
+    $lot.textContent = lotSize ?? '—';
+    setStatus('Loaded ' + currentChain.length + ' strikes.');
+    render();
+    startPolling();
+  }
+
+  function pickAtmIdx(spot) {
+    if (!currentChain.length) return -1;
+    if (!Number.isFinite(spot)) return Math.floor(currentChain.length / 2);
+    let bestI = 0, bestD = Infinity;
+    currentChain.forEach((row, i) => {
+      const d = Math.abs(row.strike - spot);
+      if (d < bestD) { bestD = d; bestI = i; }
+    });
+    return bestI;
+  }
+
+  function visibleSlice() {
+    const win = parseInt($w.value, 10) || 0;
+    if (!win || !currentChain.length) return currentChain;
+    let spot = NaN;
+    let bestDiff = Infinity;
+    for (const row of currentChain) {
+      const ce = row.ce && ltpByToken.get(row.ce.token);
+      const pe = row.pe && ltpByToken.get(row.pe.token);
+      if (Number.isFinite(ce) && Number.isFinite(pe)) {
+        const d = Math.abs(ce - pe);
+        if (d < bestDiff) { bestDiff = d; spot = row.strike + (ce - pe); }
+      }
+    }
+    const i = pickAtmIdx(spot);
+    const start = Math.max(0, i - win);
+    const end = Math.min(currentChain.length, i + win + 1);
+    if (Number.isFinite(spot)) $spot.textContent = spot.toFixed(2);
+    if (currentChain[i]) $atm.textContent = currentChain[i].strike;
+    return currentChain.slice(start, end);
+  }
+
+  function render() {
+    const slice = visibleSlice();
+    if (!slice.length) {
+      $body.innerHTML = '<tr><td colspan="9" class="muted center py-6">No strikes.</td></tr>';
+      return;
+    }
+    const atmStrike = currentChain[pickAtmIdx(parseFloat($spot.textContent))]?.strike;
+    const html = slice.map(row => {
+      const ce = row.ce, pe = row.pe;
+      const ceLtp = ce ? (ltpByToken.get(ce.token) ?? '—') : '—';
+      const peLtp = pe ? (ltpByToken.get(pe.token) ?? '—') : '—';
+      const cls = [
+        row.strike === atmStrike ? 'atm' : '',
+        atmStrike != null && row.strike < atmStrike ? 'itm-ce' : '',
+        atmStrike != null && row.strike > atmStrike ? 'itm-pe' : '',
+      ].filter(Boolean).join(' ');
+      return `
+        <tr class="${cls}" data-strike="${row.strike}">
+          <td>${ce ? `<button class="row-btn buy" data-side="BUY" data-leg="ce" data-strike="${row.strike}">B</button>` : ''}</td>
+          <td>${ce ? `<button class="row-btn sell" data-side="SELL" data-leg="ce" data-strike="${row.strike}">S</button>` : ''}</td>
+          <td class="ltp text-right" id="ltp-${ce ? ce.token : 'x'}">${typeof ceLtp === 'number' ? ceLtp.toFixed(2) : ceLtp}</td>
+          <td class="text-left text-xs font-mono">${ce ? ce.tradingSymbol : ''}</td>
+          <td class="strike">${row.strike}</td>
+          <td class="text-left text-xs font-mono">${pe ? pe.tradingSymbol : ''}</td>
+          <td class="ltp text-right" id="ltp-${pe ? pe.token : 'y'}">${typeof peLtp === 'number' ? peLtp.toFixed(2) : peLtp}</td>
+          <td>${pe ? `<button class="row-btn buy" data-side="BUY" data-leg="pe" data-strike="${row.strike}">B</button>` : ''}</td>
+          <td>${pe ? `<button class="row-btn sell" data-side="SELL" data-leg="pe" data-strike="${row.strike}">S</button>` : ''}</td>
+        </tr>`;
+    }).join('');
+    $body.innerHTML = html;
+    syncSubscriptions(slice);
+  }
+
+  let visibleItems = [];
+
+  function syncSubscriptions(slice) {
+    const wantMap = new Map();
+    for (const row of slice) {
+      if (row.ce) wantMap.set(row.ce.token, { token: row.ce.token, segment: row.ce.exchangeSegment });
+      if (row.pe) wantMap.set(row.pe.token, { token: row.pe.token, segment: row.pe.exchangeSegment });
+    }
+    const toAdd = [];
+    for (const [tok, item] of wantMap) if (!subscribed.has(tok)) toAdd.push(item);
+    const toRemove = [];
+    for (const tok of subscribed) if (!wantMap.has(tok)) toRemove.push(tok);
+    if (socket) {
+      if (toAdd.length) socket.emit('subscribe', toAdd);
+      if (toRemove.length) socket.emit('unsubscribe', toRemove);
+    }
+    subscribed = new Set(wantMap.keys());
+    visibleItems = [...wantMap.values()];
+  }
+
+  let pollTimer = null;
+  let pollInFlight = false;
+  let pollsSinceLtp = 0;
+  async function pollQuotes() {
+    if (pollInFlight || !visibleItems.length) return;
+    pollInFlight = true;
+    try {
+      const r = await fetch('/api/option-chain/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ symbols: visibleItems }),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        const ltps = j.ltps || {};
+        let got = 0;
+        for (const [tok, v] of Object.entries(ltps)) {
+          if (typeof v !== 'number') continue;
+          ltpByToken.set(tok, v);
+          got++;
+          const cell = document.getElementById('ltp-' + tok);
+          if (cell) cell.textContent = v.toFixed(2);
+        }
+        if (got > 0) {
+          pollsSinceLtp = 0;
+          setStatus('Loaded ' + currentChain.length + ' strikes · live');
+        } else if (++pollsSinceLtp >= 3) {
+          setStatus('No live LTPs — market may be closed or scrip master is stale. Try Sync Master.', true);
+        }
+      }
+    } catch (_) { /* swallow — poll will retry */ }
+    finally { pollInFlight = false; }
+  }
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(pollQuotes, 2000);
+    pollQuotes();
+  }
+
+  if (socket) {
+    socket.on('tick', (t) => {
+      if (!t || t.ltp == null) return;
+      ltpByToken.set(String(t.symbol), t.ltp);
+      const cell = document.getElementById('ltp-' + t.symbol);
+      if (cell) cell.textContent = t.ltp.toFixed(2);
+    });
+  }
+
+  $body.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-side]');
+    if (!btn) return;
+    const strike = parseFloat(btn.dataset.strike);
+    const leg = btn.dataset.leg;
+    const side = btn.dataset.side;
+    const row = currentChain.find(r => r.strike === strike);
+    const cell = leg === 'ce' ? row?.ce : row?.pe;
+    if (!cell) return;
+    const lots = Math.max(1, parseInt($q.value, 10) || 1);
+    const qty = (lotSize || cell.lotSize || 1) * lots;
+    if (!confirm(`${side} ${qty} of ${cell.tradingSymbol} (MIS, MKT)?`)) return;
+    const r = await fetch('/api/orders', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+      body: JSON.stringify({
+        symbol: cell.token,
+        tradingSymbol: cell.tradingSymbol,
+        exchange: cell.exchangeSegment,
+        side, qty,
+        product: 'MIS',
+        orderType: 'MKT',
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) setStatus(`Order queued (#${j.orderId || '?'} job ${j.jobId || '?'}).`);
+    else setStatus(j.message || j.error || 'Order failed', true);
+  });
+
+  document.getElementById('reloadBtn').addEventListener('click', loadChain);
+  document.getElementById('syncBtn').addEventListener('click', async () => {
+    setStatus('Syncing scrip master…');
+    const r = await fetch('/api/option-chain/sync', { method: 'POST', credentials: 'include' });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) {
+      setStatus(`Synced ${j.total || 0} contracts.`);
+      await loadExpiries();
+      await loadChain();
+    } else {
+      setStatus(j.message || j.error || 'Sync failed', true);
+    }
+  });
+  $u.addEventListener('change', async () => { await loadExpiries(); await loadChain(); });
+  $e.addEventListener('change', loadChain);
+  $w.addEventListener('change', () => { render(); pollQuotes(); });
+
+  // Boot
+  (async () => { await loadExpiries(); await loadChain(); })();
+});
+</script>
+
+<%- include('partials/footer') %>

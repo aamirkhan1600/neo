@@ -1,0 +1,289 @@
+<%- include('partials/header') %>
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="mb-0">Premium Trigger — Settings</h1>
+  <div class="flex gap-2">
+    <a href="/premium-trigger" class="btn">Back to dashboard</a>
+    <a href="/option-chain" class="btn">Option chain</a>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <p class="muted text-sm leading-relaxed">
+    Configure the strategy. Saving while it's running stops, clears
+    session counters, and restarts so re-arm + strike resolution run
+    fresh. Run <strong class="text-ink-900">Sync Master</strong> on the option chain page if expiries are empty.
+  </p>
+</div>
+
+<form id="ptForm" class="space-y-4">
+  <%
+    function v(x) { return (x === null || x === undefined) ? '' : x; }
+    var legs = (cfg && cfg.legs) || { ce: {}, pe: {} };
+  %>
+
+  <fieldset class="card">
+    <legend>General</legend>
+    <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))">
+      <label class="flex items-center gap-2 text-sm font-medium text-ink-700 self-end pb-2">
+        <input type="checkbox" name="enabled" id="enabled" <%= cfg.enabled ? 'checked' : '' %> /> Enabled
+      </label>
+      <div>
+        <label>Trading mode</label>
+        <select name="mode" id="mode">
+          <option value="paper" <%= cfg.mode === 'paper' ? 'selected' : '' %>>Paper (simulated)</option>
+          <option value="live"  <%= cfg.mode === 'live'  ? 'selected' : '' %>>Live (real orders)</option>
+        </select>
+      </div>
+      <div>
+        <label>Underlying</label>
+        <select name="underlyingName" id="underlying">
+          <% (cfg.indices || ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX']).forEach(function(u){ %>
+            <option value="<%= u %>" <%= cfg.underlyingName === u ? 'selected' : '' %>><%= u %></option>
+          <% }); %>
+        </select>
+      </div>
+      <div>
+        <label>Expiry</label>
+        <select name="expiry" id="expiry" data-current="<%= v(cfg.expiry) %>"><option value="">auto (nearest)</option></select>
+      </div>
+      <div>
+        <label>Strike mode</label>
+        <select name="strikeMode" id="strikeMode">
+          <option value="atm" <%= cfg.strikeMode === 'atm' ? 'selected' : '' %>>ATM</option>
+          <option value="fixed" <%= cfg.strikeMode === 'fixed' ? 'selected' : '' %>>Fixed</option>
+          <option value="otm" <%= cfg.strikeMode === 'otm' ? 'selected' : '' %>>OTM (premium-driven)</option>
+        </select>
+      </div>
+      <div id="fixedStrikeWrap" style="display:<%= cfg.strikeMode === 'fixed' ? '' : 'none' %>">
+        <label>Fixed strike</label>
+        <input type="number" name="fixedStrike" step="50" value="<%= v(cfg.fixedStrike) %>" />
+      </div>
+      <div>
+        <label>Lots</label>
+        <input type="number" name="qty" min="1" value="<%= v(cfg.qty) || 1 %>" />
+      </div>
+      <div>
+        <label>Max daily loss (₹)</label>
+        <input type="number" name="maxDailyLoss" step="100" value="<%= v(cfg.maxDailyLoss) %>" />
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset class="card" id="otmCard" style="display:<%= cfg.strikeMode === 'otm' ? '' : 'none' %>">
+    <legend>Auto-restrike (OTM only)</legend>
+    <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))">
+      <label class="flex items-center gap-2 text-sm font-medium text-ink-700 self-end pb-2">
+        <input type="checkbox" name="autoRestrikeOnDrift" <%= cfg.autoRestrikeOnDrift ? 'checked' : '' %> /> Auto-restrike on drift
+      </label>
+      <div>
+        <label>Dwell (sec)</label>
+        <input type="number" name="restrikeDwellSec" min="1" value="<%= v(cfg.restrikeDwellSec) || 60 %>" />
+      </div>
+      <div>
+        <label>Cooldown (sec)</label>
+        <input type="number" name="restrikeCooldownSec" min="1" value="<%= v(cfg.restrikeCooldownSec) || 300 %>" />
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset class="card">
+    <legend>Broker bracket exits</legend>
+    <p class="muted text-xs mb-3">
+      When enabled, after the SELL entry fills the engine places a resting
+      <strong>SL-M</strong> (trigger = entry + stoploss) and a <strong>LIMIT</strong>
+      (price = entry − target) at the broker. When one fills, the other is
+      cancelled (OCO). A tick-based safety hammer still fires a MKT exit if
+      LTP overshoots SL by the cushion below and no broker fill is seen
+      within the timeout.
+    </p>
+    <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
+      <label class="flex items-center gap-2 text-sm font-medium text-ink-700 self-end pb-2">
+        <input type="checkbox" name="useBrokerBracketExits" <%= cfg.useBrokerBracketExits ? 'checked' : '' %> />
+        Use broker bracket exits
+      </label>
+      <div>
+        <label>Safety overshoot (₹)</label>
+        <input type="number" name="bracketSafetyOvershoot" min="0" step="0.05"
+               value="<%= v(cfg.bracketSafetyOvershoot) != null ? v(cfg.bracketSafetyOvershoot) : 2 %>" />
+      </div>
+      <div>
+        <label>Safety timeout (ms)</label>
+        <input type="number" name="bracketSafetyTimeoutMs" min="500" step="100"
+               value="<%= v(cfg.bracketSafetyTimeoutMs) || 5000 %>" />
+      </div>
+      <div>
+        <label>Status poll (ms)</label>
+        <input type="number" name="bracketStatusPollMs" min="500" step="100"
+               value="<%= v(cfg.bracketStatusPollMs) || 2000 %>" />
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset class="card">
+    <legend>Trading window (IST)</legend>
+    <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))">
+      <label class="flex items-center gap-2 text-sm font-medium text-ink-700 self-end pb-2">
+        <input type="checkbox" name="tradingHoursEnabled" <%= cfg.tradingHoursEnabled === false ? '' : 'checked' %> /> Enforce market hours
+      </label>
+      <div>
+        <label>Market open</label>
+        <input type="text" name="tradingHoursStart" pattern="\d{1,2}:\d{2}" value="<%= v(cfg.tradingHoursStart) || '09:15' %>" placeholder="09:15" />
+      </div>
+      <div>
+        <label>EOD cutoff</label>
+        <input type="text" name="eodCutoff" pattern="\d{1,2}:\d{2}" value="<%= v(cfg.eodCutoff) || '15:15' %>" placeholder="15:15" />
+      </div>
+      <div>
+        <label>EOD auto-exit</label>
+        <input type="text" name="eodAutoExit" pattern="\d{1,2}:\d{2}" value="<%= v(cfg.eodAutoExit) || '15:20' %>" placeholder="15:20" />
+      </div>
+      <div>
+        <label>Market close</label>
+        <input type="text" name="tradingHoursEnd" pattern="\d{1,2}:\d{2}" value="<%= v(cfg.tradingHoursEnd) || '15:30' %>" placeholder="15:30" />
+      </div>
+    </div>
+  </fieldset>
+
+  <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr))">
+    <% ['ce','pe'].forEach(function(side){ var L = side.toUpperCase(); var leg = legs[side] || {}; %>
+      <fieldset class="card">
+        <legend class="<%= side === 'ce' ? 'text-buy' : 'text-sell' %> font-semibold"><%= L %> leg</legend>
+        <div class="space-y-3">
+          <label class="flex items-center gap-2 text-sm font-medium text-ink-700">
+            <input type="checkbox" name="<%= side %>_enabled" <%= leg.enabled ? 'checked' : '' %> /> Enabled
+          </label>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label>Entry trigger (₹)</label>
+              <input type="number" name="<%= side %>_entryTrigger" step="0.05" value="<%= v(leg.entryTrigger) %>" />
+            </div>
+            <div>
+              <label>Target (points)</label>
+              <input type="number" name="<%= side %>_target" step="0.05" value="<%= v(leg.target) || 1 %>" />
+            </div>
+            <div>
+              <label>Stoploss (points)</label>
+              <input type="number" name="<%= side %>_stoploss" step="0.05" value="<%= v(leg.stoploss) || 5 %>" />
+            </div>
+            <div>
+              <label>Re-entry offset</label>
+              <input type="number" name="<%= side %>_reentryOffset" step="0.05" value="<%= v(leg.reentryOffset) || 1 %>" />
+            </div>
+            <div>
+              <label>Re-entry target</label>
+              <input type="number" name="<%= side %>_reentryTarget" step="0.05" value="<%= v(leg.reentryTarget) || 1 %>" />
+            </div>
+            <div>
+              <label>Max entry deviation</label>
+              <input type="number" name="<%= side %>_maxEntryDeviation" step="0.05" value="<%= v(leg.maxEntryDeviation) || 10 %>" />
+            </div>
+            <div>
+              <label>Re-arm range (±)</label>
+              <input type="number" name="<%= side %>_rearmRange" step="0.05" value="<%= v(leg.rearmRange) || 5 %>" />
+            </div>
+            <div>
+              <label>Capture fade threshold</label>
+              <input type="number" name="<%= side %>_captureFadeThreshold" step="0.05" value="<%= v(leg.captureFadeThreshold) || 2 %>" />
+            </div>
+            <div>
+              <label>Re-arm lower (override)</label>
+              <input type="number" name="<%= side %>_rearmLower" step="0.05" value="<%= v(leg.rearmLower) %>" />
+            </div>
+            <div>
+              <label>Re-arm upper (override)</label>
+              <input type="number" name="<%= side %>_rearmUpper" step="0.05" value="<%= v(leg.rearmUpper) %>" />
+            </div>
+          </div>
+          <div class="border-t border-line pt-3 opacity-60">
+            <label class="flex items-center gap-2 text-sm font-medium text-ink-700 mb-2">
+              <input type="checkbox" name="<%= side %>_trailingStopLoss" <%= leg.trailingStopLoss ? 'checked' : '' %> disabled /> Trailing SL (not supported by Kotak Trade API — ignored)
+            </label>
+            <label>Trailing SL points</label>
+            <input type="number" name="<%= side %>_trailingStopLossValue" step="0.05" min="0" value="<%= v(leg.trailingStopLossValue) || 0 %>" disabled />
+          </div>
+        </div>
+      </fieldset>
+    <% }); %>
+  </div>
+
+  <fieldset class="card">
+    <legend>Cost model (per round-trip; set 0 to disable)</legend>
+    <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))">
+      <div><label>Brokerage / order (₹)</label><input type="number" name="brokeragePerOrder" step="0.5" value="<%= cfg.brokeragePerOrder != null ? cfg.brokeragePerOrder : 20 %>" /></div>
+      <div><label>STT % (sell)</label><input type="number" name="sttPctSell" step="0.0001" value="<%= cfg.sttPctSell != null ? cfg.sttPctSell : 0.0625 %>" /></div>
+      <div><label>Exch txn %</label><input type="number" name="exchTxnPct" step="0.0001" value="<%= cfg.exchTxnPct != null ? cfg.exchTxnPct : 0.03503 %>" /></div>
+      <div><label>SEBI %</label><input type="number" name="sebiPct" step="0.0001" value="<%= cfg.sebiPct != null ? cfg.sebiPct : 0.0001 %>" /></div>
+      <div><label>Stamp % (buy)</label><input type="number" name="stampPctBuy" step="0.0001" value="<%= cfg.stampPctBuy != null ? cfg.stampPctBuy : 0.003 %>" /></div>
+      <div><label>GST %</label><input type="number" name="gstPct" step="0.5" value="<%= cfg.gstPct != null ? cfg.gstPct : 18 %>" /></div>
+    </div>
+  </fieldset>
+
+  <div class="flex gap-3 items-center">
+    <button type="submit" class="btn-primary">Save settings</button>
+    <a href="/premium-trigger" class="btn">Cancel</a>
+    <span id="msg" class="muted text-sm"></span>
+  </div>
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const $form = document.getElementById('ptForm');
+  const $expiry = document.getElementById('expiry');
+  const $underlying = document.getElementById('underlying');
+  const $strikeMode = document.getElementById('strikeMode');
+  const $fixedStrikeWrap = document.getElementById('fixedStrikeWrap');
+  const $otmCard = document.getElementById('otmCard');
+  const $msg = document.getElementById('msg');
+
+  async function refreshExpiries(selected) {
+    const u = $underlying.value;
+    try {
+      const r = await fetch('/api/premium-trigger/expiries?underlying=' + encodeURIComponent(u), { credentials: 'include' });
+      const list = r.ok ? await r.json() : [];
+      const cur = selected != null ? selected : $expiry.value;
+      $expiry.innerHTML = '<option value="">auto (nearest)</option>'
+        + list.map(d => `<option value="${d}"${d===cur?' selected':''}>${d}</option>`).join('');
+    } catch (_) {}
+  }
+
+  function onModeChange() {
+    $fixedStrikeWrap.style.display = $strikeMode.value === 'fixed' ? '' : 'none';
+    $otmCard.style.display = $strikeMode.value === 'otm' ? '' : 'none';
+  }
+
+  $strikeMode.addEventListener('change', onModeChange);
+  $underlying.addEventListener('change', () => refreshExpiries(''));
+
+  $form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $msg.textContent = 'Saving…';
+    $msg.className = 'muted text-sm';
+    const fd = new FormData($form);
+    const body = {};
+    for (const [k, v] of fd.entries()) body[k] = v;
+    body.enabled = $form.elements['enabled'].checked;
+    body.autoRestrikeOnDrift = $form.elements['autoRestrikeOnDrift'].checked;
+    body.tradingHoursEnabled = $form.elements['tradingHoursEnabled'].checked;
+    body.useBrokerBracketExits = $form.elements['useBrokerBracketExits'].checked;
+    for (const side of ['ce','pe']) {
+      body[`${side}_enabled`] = $form.elements[`${side}_enabled`].checked;
+      body[`${side}_trailingStopLoss`] = $form.elements[`${side}_trailingStopLoss`].checked;
+    }
+    const r = await fetch('/api/premium-trigger/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) {
+      $msg.textContent = 'Saved.'; $msg.className = 'ok text-sm font-medium';
+      setTimeout(() => { $msg.textContent = ''; $msg.className = 'muted text-sm'; }, 2000);
+    } else {
+      $msg.textContent = j.message || j.error || 'save failed'; $msg.className = 'bad text-sm font-medium';
+    }
+  });
+
+  refreshExpiries($expiry.dataset.current || '');
+});
+</script>
+
+<%- include('partials/footer') %>

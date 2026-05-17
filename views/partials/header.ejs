@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= typeof title !== 'undefined' ? title : 'Kotak Neo SaaS' %></title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: {
+            primary: { DEFAULT: '#387ed1', dark: '#2d6cb6', soft: '#eaf2fb' },
+            buy:  { DEFAULT: '#2bbf72', soft: '#e8f7ef' },
+            sell: { DEFAULT: '#f6423c', soft: '#fde9e8' },
+            warn: { DEFAULT: '#f59e0b', soft: '#fef3c7' },
+            ink:  { 900: '#1c1f23', 700: '#374151', 500: '#6b7280', 400: '#9ca3af' },
+            line: '#e5e7eb',
+            surface: { DEFAULT: '#ffffff', muted: '#f9fafb', sunk: '#f3f4f6' },
+          },
+          boxShadow: { soft: '0 1px 2px 0 rgb(0 0 0 / 0.04)' },
+        },
+      },
+    };
+  </script>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <style type="text/tailwindcss">
+    @layer base {
+      html { @apply text-[14px]; }
+      body { @apply font-sans bg-surface-muted text-ink-900 antialiased; }
+      h1 { @apply text-2xl font-semibold mb-4 tracking-tight; }
+      h2 { @apply text-base font-semibold; }
+      h3 { @apply text-sm font-semibold uppercase tracking-wide text-ink-500; }
+      a { @apply text-primary hover:text-primary-dark; }
+      table { @apply w-full text-sm; }
+      th { @apply text-left font-medium text-ink-500 px-3 py-2 border-b border-line; }
+      td { @apply px-3 py-2 border-b border-line align-middle; }
+      tbody tr:hover { @apply bg-surface-muted; }
+      pre { @apply bg-surface-sunk border border-line rounded-md p-3 overflow-auto text-xs leading-relaxed font-mono; }
+      hr { @apply border-line my-4; }
+      fieldset { @apply min-w-0; }
+      legend { @apply text-xs uppercase tracking-wider text-ink-500 px-2; }
+    }
+    @layer components {
+      .card { @apply bg-white border border-line rounded-xl p-5 shadow-soft; }
+      .grid-cards { @apply grid gap-4; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+      .btn  { @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-md font-medium text-sm transition border border-line bg-white text-ink-900 hover:bg-surface-muted no-underline; }
+      .btn-primary { @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-md font-medium text-sm transition bg-primary text-white hover:bg-primary-dark border border-primary no-underline; }
+      .btn-warn { @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-md font-medium text-sm transition bg-sell text-white hover:opacity-90 border border-sell no-underline; }
+      .btn-secondary { @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-md font-medium text-sm transition bg-surface-muted text-ink-700 hover:bg-line border border-line no-underline; }
+      form label { @apply block text-xs font-medium text-ink-500 mb-1; }
+      form .field { @apply mb-3; }
+      form input[type="text"], form input[type="email"], form input[type="password"],
+      form input[type="number"], form input[type="date"], form input[type="search"],
+      form input:not([type]), form select, form textarea {
+        @apply w-full bg-white text-ink-900 border border-line rounded-md px-3 py-2 text-sm placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary;
+      }
+      form input[type="checkbox"] {
+        @apply h-4 w-4 rounded border-line text-primary focus:ring-primary/30 align-middle;
+      }
+      .muted { @apply text-ink-500; }
+      .ok    { @apply text-buy; }
+      .bad   { @apply text-sell; }
+      .error { @apply text-sell text-sm min-h-[1em]; }
+      .center { @apply text-center; }
+      .nav-link { @apply px-3 py-2 rounded-md text-ink-700 hover:bg-surface-muted hover:text-ink-900 no-underline font-medium; }
+      .mode-badge { @apply inline-flex items-center px-2.5 py-1 rounded font-semibold text-[11px] tracking-wider uppercase; }
+      .mode-badge.mode-paper { @apply bg-warn-soft text-amber-700; }
+      .mode-badge.mode-live  { @apply bg-sell-soft text-sell; }
+      .mode-pill { @apply inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide; }
+      .mode-pill.mode-paper { @apply bg-warn-soft text-amber-700; }
+      .mode-pill.mode-live  { @apply bg-sell-soft text-sell; }
+      .ce-head { @apply text-buy; }
+      .pe-head { @apply text-sell; }
+      .pnl-pos { @apply text-buy; }
+      .pnl-neg { @apply text-sell; }
+      .pos.SHORT { @apply text-sell font-semibold; }
+      .pos.NONE  { @apply text-ink-400; }
+      .pill { @apply inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium; }
+      .pill-ok  { @apply bg-buy-soft text-buy; }
+      .pill-bad { @apply bg-sell-soft text-sell; }
+      .pill-mute { @apply bg-surface-sunk text-ink-500; }
+      table.kv th { @apply text-ink-500 font-normal w-2/5 border-0 py-1.5; }
+      table.kv td { @apply tabular-nums border-0 py-1.5; }
+    }
+  </style>
+</head>
+<body>
+<nav class="bg-white border-b border-line sticky top-0 z-30 shadow-soft">
+  <div class="max-w-7xl mx-auto px-6 flex items-center h-14 gap-2">
+    <a href="/dashboard" class="text-primary font-bold text-base no-underline mr-4">Kotak&nbsp;Neo</a>
+    <div class="flex items-center gap-0.5 text-sm">
+      <a href="/dashboard"        class="nav-link">Dashboard</a>
+      <a href="/option-chain"     class="nav-link">Option Chain</a>
+      <a href="/premium-trigger"  class="nav-link">Premium Trigger</a>
+      <a href="/strategies"       class="nav-link">Strategies</a>
+      <a href="/orders"           class="nav-link">Orders</a>
+      <a href="/portfolio"        class="nav-link">Portfolio</a>
+      <a href="/broker"           class="nav-link">Broker</a>
+    </div>
+    <a href="#" id="logoutLink" class="ml-auto text-ink-500 hover:text-ink-900 text-sm no-underline">Logout</a>
+  </div>
+</nav>
+<main class="max-w-7xl mx-auto px-6 py-6">

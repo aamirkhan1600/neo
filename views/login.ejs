@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in · Kotak Neo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] }, colors: { primary: { DEFAULT: '#387ed1', dark: '#2d6cb6' }, ink: { 900: '#1c1f23', 500: '#6b7280' }, line: '#e5e7eb' } } } };
+  </script>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body class="font-sans bg-surface-muted text-ink-900 antialiased min-h-screen flex items-center justify-center px-4">
+  <form id="loginForm" class="w-full max-w-sm bg-white border border-line rounded-xl p-8 shadow-soft">
+    <div class="text-primary font-bold text-lg mb-1">Kotak&nbsp;Neo</div>
+    <h1 class="text-xl font-semibold mb-6 tracking-tight">Sign in</h1>
+
+    <div class="mb-4">
+      <label for="emailIn" class="block text-xs font-medium text-ink-500 mb-1">Email</label>
+      <input id="emailIn" name="email" type="email" required
+             class="w-full bg-white border border-line rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary" />
+    </div>
+    <div class="mb-5">
+      <label for="passIn" class="block text-xs font-medium text-ink-500 mb-1">Password</label>
+      <input id="passIn" name="password" type="password" required
+             class="w-full bg-white border border-line rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary" />
+    </div>
+
+    <button type="submit"
+            class="w-full inline-flex items-center justify-center px-3.5 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-dark border border-primary transition">
+      Sign in
+    </button>
+
+    <p class="mt-4 text-sm text-ink-500">No account? <a href="/register" class="text-primary hover:text-primary-dark font-medium">Register</a></p>
+    <p id="err" class="mt-3 text-sm text-red-600 min-h-[1em]"></p>
+  </form>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const res = await fetch('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: fd.get('email'), password: fd.get('password') }),
+        credentials: 'include',
+      });
+      if (res.ok) location.href = '/dashboard';
+      else document.getElementById('err').textContent = (await res.json()).message || 'Login failed';
+    });
+  </script>
+</body>
+</html>
